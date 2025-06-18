@@ -1,0 +1,191 @@
+#!/usr/bin/env python3
+"""
+GPU TTS with automatic chunking for large texts
+"""
+import sys
+import os
+import torch
+from TTS.api import TTS
+from pathlib import Path
+import warnings
+import soundfile as sf
+import numpy as np
+import re
+
+# Suppress warnings and verbose output
+warnings.filterwarnings('ignore')
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+
+def chunk_text(text, max_chars=500):
+    """Split text into chunks at sentence boundaries"""
+    # Split into sentences
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    
+    chunks = []
+    current_chunk = ""
+    
+    for sentence in sentences:
+        sentence = sentence.strip()
+        if not sentence:
+            continue
+            
+        # If adding this sentence exceeds limit, save current chunk
+        if len(current_chunk) + len(sentence) + 1 > max_chars and current_chunk:
+            chunks.append(current_chunk.strip())
+            current_chunk = sentence
+        else:
+            current_chunk += (" " if current_chunk else "") + sentence
+    
+    # Add last chunk
+    if current_chunk:
+        chunks.append(current_chunk.strip())
+    
+    return chunks
+
+def combine_audio_files(audio_files, output_file, sample_rate):
+    """Combine multiple audio files into one"""
+    print(f"\nCombining {len(audio_files)} audio chunks...")
+    
+    all_audio = []
+    for i, file in enumerate(audio_files):
+        data, sr = sf.read(file)
+        all_audio.extend(data)
+        # Add small pause between chunks (0.5 seconds)
+        all_audio.extend([0] * int(0.5 * sample_rate))
+        print(f"  Added chunk {i+1}/{len(audio_files)}")
+    
+    # Convert to numpy array and normalize
+    audio_array = np.array(all_audio)
+    max_val = np.max(np.abs(audio_array))
+    if max_val > 0:
+        audio_array = audio_array / max_val * 0.95
+    
+    # Save combined audio
+    sf.write(output_file, audio_array, sample_rate)
+    print(f"✓ Combined audio saved to: {output_file}")
+    
+    # Clean up chunk files
+    for file in audio_files:
+        os.remove(file)
+    print(f"  Cleaned up temporary files")
+
+def main():
+    if len(sys.argv) < 3:
+        print("Usage: tts-gpu-chunked <input.txt> <output.wav> [voice] [speaker/reference]")
+        print("\nVoices:")
+        print("  jenny   - High quality female (default)")
+        print("  male    - Clear male voice")
+        print("  vctk    - Multi-speaker (109 voices)")
+        print("  fast    - Fast synthesis")
+        print("\nFor vctk, add speaker ID: tts-gpu-chunked input.txt out.wav vctk p225")
+        print("\nThis version automatically chunks large texts to prevent timeouts.")
+        sys.exit(1)
+    
+    input_file = sys.argv[1]
+    output_file = sys.argv[2]
+    voice = sys.argv[3] if len(sys.argv) > 3 else "jenny"
+    speaker = sys.argv[4] if len(sys.argv) > 4 else None
+    
+    # Check GPU
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"Using device: {device}")
+    if device == "cuda":
+        print(f"GPU: {torch.cuda.get_device_name(0)}")
+    
+    # Read input text
+    with open(input_file, 'r', encoding='utf-8') as f:
+        text = f.read().strip()
+    
+    if not text:
+        print("Error: Input file is empty!")
+        sys.exit(1)
+    
+    print(f"Input: {input_file}")
+    print(f"Output: {output_file}")
+    print(f"Voice: {voice}")
+    print(f"Text length: {len(text)} characters")
+    
+    # Chunk if text is too long
+    max_chunk_size = 800 if voice == "jenny" else 1000
+    
+    if len(text) > max_chunk_size:
+        chunks = chunk_text(text, max_chunk_size)
+        print(f"\nText too long, splitting into {len(chunks)} chunks")
+    else:
+        chunks = [text]
+    
+    # Select model
+    models = {
+        "jenny": "tts_models/en/jenny/jenny",
+        "male": "tts_models/en/ljspeech/tacotron2-DDC",
+        "vctk": "tts_models/en/vctk/vits",
+        "fast": "tts_models/en/ljspeech/glow-tts",
+    }
+    
+    model_name = models.get(voice, models["jenny"])
+    print(f"Loading model: {model_name}")
+    
+    # Initialize TTS
+    tts = TTS(model_name, progress_bar=False)
+    tts.to(device)
+    
+    # Get sample rate
+    sample_rate = 48000 if voice == "jenny" else 22050
+    
+    # Process chunks
+    chunk_files = []
+    print(f"\nGenerating speech for {len(chunks)} chunks...")
+    
+    for i, chunk in enumerate(chunks):
+        print(f"\nProcessing chunk {i+1}/{len(chunks)} ({len(chunk)} chars)...")
+        
+        # Generate temp filename
+        temp_file = f"{output_file}.chunk_{i:03d}.wav"
+        
+        try:
+            if voice == "vctk":
+                # Multi-speaker model
+                if not speaker:
+                    speaker = "p226"  # Default
+                tts.tts_to_file(
+                    text=chunk,
+                    speaker=speaker,
+                    file_path=temp_file
+                )
+            else:
+                # Single speaker models
+                tts.tts_to_file(
+                    text=chunk,
+                    file_path=temp_file
+                )
+            
+            chunk_files.append(temp_file)
+            print(f"  ✓ Chunk {i+1} complete")
+            
+            # Clear GPU cache periodically
+            if device == "cuda" and i % 5 == 0:
+                torch.cuda.empty_cache()
+                
+        except Exception as e:
+            print(f"  ✗ Error in chunk {i+1}: {e}")
+            # Clean up any created chunks
+            for f in chunk_files:
+                if os.path.exists(f):
+                    os.remove(f)
+            sys.exit(1)
+    
+    # Combine all chunks
+    if len(chunk_files) > 1:
+        combine_audio_files(chunk_files, output_file, sample_rate)
+    else:
+        # Just rename the single chunk
+        os.rename(chunk_files[0], output_file)
+        print(f"✓ Audio saved to: {output_file}")
+    
+    # Get file info
+    if os.path.exists(output_file):
+        size = os.path.getsize(output_file) / 1024 / 1024
+        print(f"\nFinal file size: {size:.2f} MB")
+
+if __name__ == "__main__":
+    main()
