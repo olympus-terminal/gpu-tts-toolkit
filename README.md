@@ -1,6 +1,6 @@
 # GPU-Accelerated TTS Toolkit
 
-> Enterprise-grade, GPU-accelerated text-to-speech toolkit with neural synthesis, real-time streaming, and production-ready deployment.
+> GPU-accelerated text-to-speech toolkit for Linux and HPC environments. Fast neural speech synthesis on your local hardware.
 
 [![License](https://img.shields.io/github/license/olympus-terminal/gpu-tts-toolkit)](LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/olympus-terminal/gpu-tts-toolkit?style=social)](https://github.com/olympus-terminal/gpu-tts-toolkit/stargazers)
@@ -12,27 +12,27 @@
 
 ## 🚀 Overview
 
-A comprehensive, high-performance text-to-speech toolkit designed for enterprise applications requiring natural, expressive speech synthesis at scale. Built with GPU acceleration from the ground up, supporting the latest neural TTS models and real-time streaming capabilities.
+A high-performance text-to-speech toolkit designed for Linux workstations and HPC environments. Built with GPU acceleration for researchers, developers, and organizations needing fast, high-quality speech synthesis on local infrastructure.
 
 ### Key Features
 
-- **GPU-First Architecture**: Native CUDA acceleration for 10-50x faster synthesis
-- **State-of-the-Art Models**: Tacotron2, FastSpeech2, VITS, and custom architectures
-- **Real-Time Streaming**: Sub-100ms latency for conversational AI applications
-- **Voice Cloning**: Clone voices with as little as 5 minutes of audio
-- **Enterprise Integration**: REST APIs, WebSocket streaming, and MCP protocols
-- **Production Ready**: Monitoring, scaling, and deployment tools included
+- **GPU-First Architecture**: Native CUDA acceleration for faster synthesis
+- **Neural TTS Models**: FastSpeech2 implementation with optimization framework
+- **Batch Processing**: Efficient processing of large text datasets
+- **HPC Ready**: Designed for SLURM clusters and multi-GPU systems
+- **Local Deployment**: No cloud dependencies, runs entirely on your hardware
+- **Research Friendly**: Modular design for experimenting with new architectures
 
-## 📊 Performance Benchmarks
+## 📊 Performance Goals
 
-| Model | RTF (CPU) | RTF (GPU) | Latency | Quality (MOS) |
-|-------|-----------|-----------|---------|---------------|
-| FastSpeech2 | 0.85 | 0.03 | 45ms | 4.2 |
-| Tacotron2 + WaveGlow | 3.2 | 0.08 | 120ms | 4.5 |
-| VITS | 1.5 | 0.05 | 75ms | 4.4 |
-| Custom Neural | 0.95 | 0.02 | 30ms | 4.3 |
+| Metric | Target | Notes |
+|--------|--------|-------|
+| GPU Utilization | >80% | During batch synthesis |
+| RTF (Real-Time Factor) | <0.1 | Lower is better |
+| Memory Efficiency | Optimized | For large batch processing |
+| HPC Scaling | Linear | Multi-GPU support planned |
 
-*RTF = Real-Time Factor (lower is better), tested on NVIDIA A100*
+*Performance will vary based on GPU model, batch size, and model architecture*
 
 ## 📁 Repository Structure
 
@@ -54,10 +54,10 @@ gpu-tts-toolkit/
 │   ├── pretrained/     # Ready-to-use models
 │   ├── custom/         # Custom voice models
 │   └── fine-tuning/    # Model adaptation tools
-├── enterprise/         # Production features
-│   ├── monitoring/     # Prometheus metrics, logging
-│   ├── scaling/        # Kubernetes, load balancing
-│   └── deployment/     # Docker, cloud deployment
+├── deployment/         # Local deployment tools
+│   ├── hpc/           # SLURM job scripts
+│   ├── monitoring/    # Local performance monitoring
+│   └── systemd/       # System service configurations
 ├── workflows/          # Automation and pipelines
 │   ├── batch-processing/  # Bulk TTS generation
 │   ├── real-time/        # Live synthesis pipelines
@@ -74,16 +74,11 @@ gpu-tts-toolkit/
 
 ```bash
 # System requirements
-- NVIDIA GPU with compute capability >= 7.0
-- CUDA 11.0 or higher
-- cuDNN 8.0 or higher
+- Linux (Ubuntu 20.04+ or similar)
+- NVIDIA GPU (GTX 1060 or better recommended)
+- CUDA 11.0+ (check with: nvidia-smi)
 - Python 3.8+
-
-# Install CUDA (Ubuntu example)
-wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/cuda-keyring_1.0-1_all.deb
-sudo dpkg -i cuda-keyring_1.0-1_all.deb
-sudo apt-get update
-sudo apt-get -y install cuda
+- 8GB+ GPU memory for batch processing
 
 # Python dependencies
 pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu118
@@ -324,34 +319,34 @@ docker build -t gpu-tts:latest -f docker/Dockerfile.cuda .
 docker run --gpus all -p 8080:8080 gpu-tts:latest
 ```
 
-### Kubernetes
+### HPC Deployment
 
-Scalable deployment with GPU scheduling:
+SLURM job script example:
 
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: gpu-tts
-spec:
-  replicas: 3
-  template:
-    spec:
-      containers:
-      - name: tts
-        image: gpu-tts:latest
-        resources:
-          limits:
-            nvidia.com/gpu: 1
+```bash
+#!/bin/bash
+#SBATCH --job-name=gpu-tts
+#SBATCH --partition=gpu
+#SBATCH --gres=gpu:1
+#SBATCH --mem=32G
+#SBATCH --time=24:00:00
+
+module load cuda/11.8
+module load python/3.10
+
+source venv/bin/activate
+python -m gpu_tts.batch_process --input texts.txt --output audio/
 ```
 
-### Cloud Deployment
+### Local Server Deployment
 
-Templates for major cloud providers:
+Systemd service for persistent TTS server:
 
-- **AWS**: EKS with GPU instances (p3, g4dn)
-- **GCP**: GKE with GPU node pools
-- **Azure**: AKS with GPU VMs
+```bash
+sudo cp deployment/systemd/gpu-tts.service /etc/systemd/system/
+sudo systemctl enable gpu-tts
+sudo systemctl start gpu-tts
+```
 
 ## 📈 Use Cases
 
@@ -386,17 +381,22 @@ audiobook = narrator.narrate_book(
 )
 ```
 
-### Enterprise IVR
+### Research Applications
 
 ```python
-# High-concurrency IVR system
-ivr_system = GPUIVRSystem(
-    voices=["emily", "james"],
-    concurrent_calls=1000,
-    fallback_mode="cpu"
+# Process research datasets
+researcher = TTSDatasetProcessor(
+    model="fastspeech2",
+    output_format="wav",
+    sample_rate=22050
 )
 
-ivr_system.start(port=5060)  # SIP integration
+# Generate speech dataset from transcripts
+researcher.process_dataset(
+    transcripts="data/transcripts.txt",
+    output_dir="data/synthesized/",
+    speaker_id=0
+)
 ```
 
 ## 🛠️ Advanced Features
