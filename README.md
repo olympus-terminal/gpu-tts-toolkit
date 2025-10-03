@@ -1,6 +1,6 @@
 # GPU-Accelerated TTS Toolkit
 
-> GPU-accelerated text-to-speech toolkit for Linux and HPC environments. Fast neural speech synthesis on your local hardware.
+GPU-accelerated text-to-speech toolkit for Linux and HPC environments. Fast neural speech synthesis on your local hardware.
 
 [![License](https://img.shields.io/github/license/olympus-terminal/gpu-tts-toolkit)](LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/olympus-terminal/gpu-tts-toolkit?style=social)](https://github.com/olympus-terminal/gpu-tts-toolkit/stargazers)
@@ -10,7 +10,7 @@
 [![Python](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org)
 [![CUDA](https://img.shields.io/badge/CUDA-11.0+-76B900.svg)](https://developer.nvidia.com/cuda-toolkit)
 
-## 🚀 Overview
+## Overview
 
 A high-performance text-to-speech toolkit designed for Linux workstations and HPC environments. Built with GPU acceleration for researchers, developers, and organizations needing fast, high-quality speech synthesis on local infrastructure.
 
@@ -23,7 +23,7 @@ A high-performance text-to-speech toolkit designed for Linux workstations and HP
 - **Local Deployment**: No cloud dependencies, runs entirely on your hardware
 - **Research Friendly**: Modular design for experimenting with new architectures
 
-## 📊 Performance Goals
+## Performance Goals
 
 | Metric | Target | Notes |
 |--------|--------|-------|
@@ -34,7 +34,7 @@ A high-performance text-to-speech toolkit designed for Linux workstations and HP
 
 *Performance will vary based on GPU model, batch size, and model architecture*
 
-## 📁 Repository Structure
+## Repository Structure
 
 ```
 gpu-tts-toolkit/
@@ -68,7 +68,7 @@ gpu-tts-toolkit/
     └── commercial/       # IVR, announcements
 ```
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 
@@ -120,7 +120,7 @@ async for chunk in tts.stream("Streaming text to speech in real-time"):
     play_audio_chunk(chunk)
 ```
 
-## 🎯 Core Engines
+## Core Engines
 
 ### FastSpeech2 GPU
 
@@ -176,7 +176,7 @@ cloner.adapt(
 cloned_audio = cloner.synthesize("New text in cloned voice")
 ```
 
-## 🔌 Enterprise Integration
+## Enterprise Integration
 
 ### REST API Server
 
@@ -232,7 +232,7 @@ ws.onmessage = (event) => {
 };
 ```
 
-## 🚄 GPU Acceleration
+## GPU Acceleration
 
 ### Custom CUDA Kernels
 
@@ -278,7 +278,7 @@ with MemoryManager(max_memory_gb=8) as mm:
         audio = tts.synthesize_batch(batch)
 ```
 
-## 📊 Monitoring & Analytics
+## Monitoring & Analytics
 
 ### Prometheus Metrics
 
@@ -305,7 +305,7 @@ Access dashboards:
 - Grafana: http://localhost:3000
 - Prometheus: http://localhost:9090
 
-## 🐳 Deployment
+## Deployment
 
 ### Docker
 
@@ -348,7 +348,7 @@ sudo systemctl enable gpu-tts
 sudo systemctl start gpu-tts
 ```
 
-## 📈 Use Cases
+## Use Cases
 
 ### Conversational AI
 
@@ -399,7 +399,7 @@ researcher.process_dataset(
 )
 ```
 
-## 🛠️ Advanced Features
+## Advanced Features
 
 ### Emotion Control
 
@@ -439,7 +439,7 @@ tts.synthesize(
 )
 ```
 
-## 🤝 Contributing
+## Contributing
 
 We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
@@ -450,7 +450,7 @@ Areas of interest:
 - Cloud integrations
 - Voice quality improvements
 
-## 📚 Citations
+## Citations
 
 If you use this toolkit in research, please cite:
 
@@ -463,18 +463,18 @@ If you use this toolkit in research, please cite:
 }
 ```
 
-## 📄 License
+## License
 
 MIT License - see [LICENSE](LICENSE) file for details.
 
-## 🌟 Acknowledgments
+## Acknowledgments
 
 - NVIDIA for CUDA and TensorRT
 - Mozilla TTS contributors
 - Tacotron2, FastSpeech2, and VITS authors
 - Open source TTS community
 
-## 📮 Contact
+## Contact
 
 - Issues: [GitHub Issues](https://github.com/olympus-terminal/gpu-tts-toolkit/issues)
 - Discussions: [GitHub Discussions](https://github.com/olympus-terminal/gpu-tts-toolkit/discussions)
