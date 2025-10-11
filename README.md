@@ -1,6 +1,6 @@
-# GPU-Accelerated TTS Toolkit
+# GPU TTS Toolkit
 
-GPU-accelerated text-to-speech toolkit for Linux and HPC environments. Fast neural speech synthesis on your local hardware.
+Text-to-speech tools using GPU acceleration. Useful for converting papers and documents to audio.
 
 [![License](https://img.shields.io/github/license/olympus-terminal/gpu-tts-toolkit)](LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/olympus-terminal/gpu-tts-toolkit?style=social)](https://github.com/olympus-terminal/gpu-tts-toolkit/stargazers)
@@ -12,7 +12,7 @@ GPU-accelerated text-to-speech toolkit for Linux and HPC environments. Fast neur
 
 ## Overview
 
-A high-performance text-to-speech toolkit designed for Linux workstations and HPC environments. Built with GPU acceleration for researchers, developers, and organizations needing fast, high-quality speech synthesis on local infrastructure.
+Text-to-speech scripts optimized for GPU use. Designed for processing scientific papers, documentation, and other text on local hardware.
 
 ### Key Features
 
@@ -46,7 +46,7 @@ gpu-tts-toolkit/
 │   ├── cuda/            # Custom CUDA kernels
 │   ├── tensorrt/        # TensorRT optimization
 │   └── optimization/    # Memory and performance optimization
-├── integrations/        # Enterprise integrations
+├── integrations/        # API and service integrations
 │   ├── api/            # REST and gRPC APIs
 │   ├── mcp/            # Model Context Protocol
 │   └── streaming/      # WebSocket and real-time streaming
@@ -176,7 +176,7 @@ cloner.adapt(
 cloned_audio = cloner.synthesize("New text in cloned voice")
 ```
 
-## Enterprise Integration
+## API Integration
 
 ### REST API Server
 
