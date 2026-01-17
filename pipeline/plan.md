@@ -94,7 +94,7 @@
     "id": 9,
     "category": "code",
     "description": "Add cleanup logic to paper_to_audio.py - remove PDFs and text after audio generated (unless --keep flags)",
-    "passes": false,
+    "passes": true,
     "acceptance": "By default, intermediate files are deleted after successful audio generation"
   },
   {

@@ -42,5 +42,10 @@
 - tqdm already installed in tts-app environment (v4.67.1)
 - Tested: progress bars display correctly (e.g., "Processing PDFs: 100%|██████████| 1/1")
 - Task 8 complete
+- Verified cleanup logic in paper_to_audio.py (Task 9)
+- Cleanup was already implemented as part of Task 5: cleanup() method removes downloads/, texts/, papers.json
+- Verified test_success/ and test_task7/ directories contain only audio output (no intermediate files)
+- Flags --keep-pdfs and --keep-text correctly preserve files when specified
+- Task 9 complete
 
 ---
