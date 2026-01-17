@@ -38,7 +38,7 @@
     "id": 4,
     "category": "code",
     "description": "Create pdf_to_text.py - extract and clean PDF text for TTS readability",
-    "passes": false,
+    "passes": true,
     "acceptance": "python pdf_to_text.py downloads/ texts/ creates readable .txt files",
     "spec": {
       "input": "directory of PDFs",

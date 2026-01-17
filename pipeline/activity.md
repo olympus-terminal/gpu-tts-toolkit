@@ -15,5 +15,9 @@
 - Features: PMID-to-PMCID conversion, skip already downloaded, progress tracking, status.json output
 - Tested successfully: downloaded 1 PDF from Europe PMC using existing papers.json
 - Task 3 complete
+- Created pdf_to_text.py with PyMuPDF text extraction and comprehensive TTS cleaning
+- Cleaning features: numeric citations, author-year citations, URLs, DOIs, figure/table refs, page numbers, email addresses, copyright notices, equation refs, whitespace normalization, hyphenation rejoining
+- Tested successfully: `python pdf_to_text.py downloads/ texts/` converted 1 PDF (52477 chars -> 50601 chars cleaned)
+- Task 4 complete
 
 ---
