@@ -76,7 +76,7 @@
     "id": 7,
     "category": "test",
     "description": "Test full pipeline end-to-end with a real query",
-    "passes": false,
+    "passes": true,
     "acceptance": "python paper_to_audio.py 'bioremediation' --papers 1 produces working MP3"
   },
   {
