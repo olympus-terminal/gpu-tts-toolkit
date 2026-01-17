@@ -69,7 +69,7 @@
     "id": 6,
     "category": "test",
     "description": "Test paper_search.py with real query and verify JSON output structure",
-    "passes": false,
+    "passes": true,
     "acceptance": "Query returns valid JSON with expected fields, no API errors"
   },
   {

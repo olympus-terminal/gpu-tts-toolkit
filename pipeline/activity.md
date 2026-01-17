@@ -25,5 +25,10 @@
 - Tested successfully: `python paper_to_audio.py 'SARS-CoV-2 open access' --papers 2 --voice p240` produced 2 MP3 files (30MB + 54MB)
 - Intermediate files cleaned up automatically (PDFs, text files, papers.json)
 - Task 5 complete
+- Tested paper_search.py with real query 'bioremediation heavy metals' --papers 5
+- Verified JSON output structure: all 5 papers have required fields (doi, pmid, title, authors, year, source)
+- Verified field types are correct (strings, lists, ints as expected)
+- Ran second query ('CRISPR gene editing') to confirm API stability - no errors
+- Task 6 complete
 
 ---
