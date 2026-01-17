@@ -83,7 +83,7 @@
     "id": 8,
     "category": "code",
     "description": "Add progress bars using tqdm throughout the pipeline",
-    "passes": false,
+    "passes": true,
     "acceptance": "All scripts show progress bars for long operations",
     "spec": {
       "install": "pip install tqdm",

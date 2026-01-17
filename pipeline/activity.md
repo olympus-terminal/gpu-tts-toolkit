@@ -35,5 +35,12 @@
 - Produced 2 valid MP3 files: 57.23 MB and 60.09 MB with proper MP3 headers
 - Verified entire flow works: paper_search.py → paper_download.py → pdf_to_text.py → deep_voice_tts.py
 - Task 7 complete
+- Added tqdm progress bars to all pipeline scripts (Task 8)
+- paper_download.py: progress bar for "Downloading papers" loop
+- pdf_to_text.py: progress bar for "Processing PDFs" loop
+- paper_to_audio.py: progress bar for "Generating audio" TTS loop
+- tqdm already installed in tts-app environment (v4.67.1)
+- Tested: progress bars display correctly (e.g., "Processing PDFs: 100%|██████████| 1/1")
+- Task 8 complete
 
 ---
