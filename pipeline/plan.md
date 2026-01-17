@@ -57,7 +57,7 @@
     "id": 5,
     "category": "code",
     "description": "Create paper_to_audio.py - unified CLI that chains search->download->text->TTS",
-    "passes": false,
+    "passes": true,
     "acceptance": "python paper_to_audio.py 'test query' --papers 1 produces MP3 output",
     "spec": {
       "usage": "python paper_to_audio.py 'query' --papers N [--voice p240] [--output dir] [--keep-pdfs] [--keep-text]",
