@@ -101,7 +101,7 @@
     "id": 10,
     "category": "docs",
     "description": "Update main README with pipeline usage examples",
-    "passes": false,
+    "passes": true,
     "acceptance": "README.md has section documenting paper_to_audio.py usage"
   }
 ]

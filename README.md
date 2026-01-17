@@ -104,39 +104,203 @@ gpu-tts-toolkit/
 
 ### Prerequisites
 
-```bash
-# System requirements
-- Linux (Ubuntu 20.04+ or similar)
-- NVIDIA GPU (GTX 1060 or better recommended)
-- CUDA 11.0+ (check with: nvidia-smi)
-- Python 3.8+
-- 8GB+ GPU memory for batch processing
-
-# Python dependencies
-pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu118
-pip install -r requirements.txt
-```
+**System requirements:**
+- Linux (Ubuntu 20.04+ recommended)
+- NVIDIA GPU with 6GB+ VRAM (RTX 3060 or better recommended)
+- CUDA-compatible driver (check with `nvidia-smi`)
+- Python 3.10+
+- conda or miniconda
 
 ### Installation
+
+#### 1. Install System Dependencies
+
+```bash
+# Required for text-to-phoneme conversion
+sudo apt install espeak-ng
+
+# Optional: for audio playback
+sudo apt install portaudio19-dev ffmpeg
+```
+
+#### 2. Create Conda Environment
+
+```bash
+# Create and activate environment
+conda create -n tts-app python=3.10 -y
+conda activate tts-app
+```
+
+#### 3. Install PyTorch with CUDA
+
+Check your CUDA version first:
+```bash
+nvidia-smi  # Look for "CUDA Version" in the output
+```
+
+Install PyTorch matching your CUDA version:
+```bash
+# For CUDA 12.x (most modern systems)
+pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu124
+
+# For CUDA 11.8
+pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu118
+```
+
+#### 4. Install TTS and Dependencies
 
 ```bash
 # Clone the repository
 git clone https://github.com/olympus-terminal/gpu-tts-toolkit.git
 cd gpu-tts-toolkit
 
-# Install dependencies
+# Install Coqui TTS (main TTS engine)
+pip install TTS
+
+# Install additional dependencies
+pip install pydub librosa soundfile
+
+# Optional: install remaining requirements
 pip install -r requirements.txt
+```
+
+#### 5. Verify Installation
+
+```bash
+# Check PyTorch CUDA
+python -c "import torch; print('CUDA:', torch.cuda.is_available(), torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'N/A')"
+
+# Check TTS
+python -c "from TTS.api import TTS; print('TTS OK')"
+
+# Test the script
+python deep_voice_tts.py --help
 ```
 
 ### Basic Usage
 
 ```bash
-# Convert text file to audio
-python deep_voice_tts.py input.txt output.wav
+# Convert text file to audio (uses random voice)
+python deep_voice_tts.py input.txt
 
-# Use improved pipeline with preprocessing
-python improved_tts_pipeline.py paper.pdf paper_audio.wav
+# List available voices
+python deep_voice_tts.py --list-voices
+
+# Use specific voice
+python deep_voice_tts.py input.txt --voice p240
+
+# Output as MP3
+python deep_voice_tts.py input.txt --format mp3
+
+# Force CPU (if GPU issues)
+python deep_voice_tts.py input.txt --device cpu
 ```
+
+### Batch Processing
+
+```bash
+# Process all files in a directory
+for f in papers/*.txt; do python deep_voice_tts.py "$f"; done
+```
+
+## Paper-to-Audio Pipeline
+
+The `pipeline/` directory contains tools to automatically search, download, and convert academic papers to audio.
+
+### Pipeline Overview
+
+```
+Query String → paper_search.py → paper_download.py → pdf_to_text.py → deep_voice_tts.py → MP3 Audio
+```
+
+1. **paper_search.py** - Search CrossRef and PubMed APIs for papers matching your query
+2. **paper_download.py** - Download PDFs from open access sources (PMC, Unpaywall, Europe PMC)
+3. **pdf_to_text.py** - Extract text and clean it for TTS (removes citations, URLs, figure references)
+4. **deep_voice_tts.py** - Generate audio from the cleaned text
+
+### Quick Start
+
+```bash
+cd pipeline/
+
+# Search for papers and convert to audio
+python paper_to_audio.py 'biomimetic concrete' --papers 2
+
+# Specify a voice
+python paper_to_audio.py 'CRISPR gene editing' --papers 1 --voice p240
+
+# Keep intermediate files for inspection
+python paper_to_audio.py 'bioremediation' --papers 3 --keep-pdfs --keep-text
+
+# Custom output directory
+python paper_to_audio.py 'machine learning' --papers 2 --output my_audio/
+```
+
+### Pipeline Options
+
+| Option | Description |
+|--------|-------------|
+| `query` | Search query for academic papers (required) |
+| `--papers N` | Number of papers to search for (default: 3) |
+| `--voice ID` | Voice profile: speaker ID (p230, p240, etc.) or "random" |
+| `--output DIR` | Output directory (default: output/) |
+| `--keep-pdfs` | Keep downloaded PDFs after audio generation |
+| `--keep-text` | Keep extracted text files after audio generation |
+
+### Individual Scripts
+
+You can also run each pipeline stage independently:
+
+```bash
+# Search only - outputs papers.json
+python paper_search.py 'your query' --papers 5
+
+# Download PDFs from papers.json
+python paper_download.py papers.json --output downloads/
+
+# Extract text from PDFs
+python pdf_to_text.py downloads/ texts/
+```
+
+### Notes
+
+- Only open access papers can be downloaded (PMC, Unpaywall, Europe PMC)
+- Not all papers in search results will have downloadable PDFs
+- By default, intermediate files (PDFs, text) are cleaned up after audio generation
+- Audio files are saved in timestamped directories within the output folder
+
+## Troubleshooting
+
+### "No espeak backend found"
+
+Install espeak-ng:
+```bash
+sudo apt install espeak-ng
+```
+
+### "No module named 'TTS'"
+
+Install Coqui TTS:
+```bash
+pip install TTS
+```
+
+### CUDA out of memory
+
+Try a smaller batch or force CPU:
+```bash
+python deep_voice_tts.py input.txt --device cpu
+```
+
+### PyTorch not detecting GPU
+
+1. Check driver: `nvidia-smi`
+2. Reinstall PyTorch with correct CUDA version
+3. Verify: `python -c "import torch; print(torch.cuda.is_available())"`
+
+### First run is slow
+
+The first run downloads model files (~1GB). Subsequent runs are faster.
 
 ## Contributing
 
