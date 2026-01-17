@@ -11,5 +11,9 @@
 - Tested successfully: `python paper_search.py 'biomimetic concrete' --papers 3` returns valid JSON
 - Features implemented: deduplication by DOI, rate limiting, merged results from both APIs
 - Task 2 complete
+- Created paper_download.py with PMC/Unpaywall/EuropePMC download support
+- Features: PMID-to-PMCID conversion, skip already downloaded, progress tracking, status.json output
+- Tested successfully: downloaded 1 PDF from Europe PMC using existing papers.json
+- Task 3 complete
 
 ---

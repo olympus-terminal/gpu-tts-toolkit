@@ -24,7 +24,7 @@
     "id": 3,
     "category": "code",
     "description": "Create paper_download.py - download PDFs from PMC/Unpaywall/EuropePMC using papers.json",
-    "passes": false,
+    "passes": true,
     "acceptance": "python paper_download.py papers.json downloads at least 1 PDF",
     "spec": {
       "input": "papers.json from paper_search.py",
