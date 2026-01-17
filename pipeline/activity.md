@@ -19,5 +19,11 @@
 - Cleaning features: numeric citations, author-year citations, URLs, DOIs, figure/table refs, page numbers, email addresses, copyright notices, equation refs, whitespace normalization, hyphenation rejoining
 - Tested successfully: `python pdf_to_text.py downloads/ texts/` converted 1 PDF (52477 chars -> 50601 chars cleaned)
 - Task 4 complete
+- Created paper_to_audio.py - unified CLI orchestrating search->download->text->TTS
+- Features: subprocess calls to each pipeline stage, progress messages, error handling, cleanup logic
+- Fixed absolute path issue for TTS stage when running from output directory
+- Tested successfully: `python paper_to_audio.py 'SARS-CoV-2 open access' --papers 2 --voice p240` produced 2 MP3 files (30MB + 54MB)
+- Intermediate files cleaned up automatically (PDFs, text files, papers.json)
+- Task 5 complete
 
 ---
