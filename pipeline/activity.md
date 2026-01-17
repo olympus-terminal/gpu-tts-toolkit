@@ -47,5 +47,8 @@
 - Verified test_success/ and test_task7/ directories contain only audio output (no intermediate files)
 - Flags --keep-pdfs and --keep-text correctly preserve files when specified
 - Task 9 complete
+- Updated main README.md with Paper-to-Audio Pipeline section (Task 10)
+- Documented: pipeline overview, quick start examples, CLI options table, individual script usage, notes
+- Task 10 complete - ALL TASKS COMPLETE
 
 ---
