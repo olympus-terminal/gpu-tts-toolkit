@@ -20,6 +20,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from tqdm import tqdm
 
 
 class PaperToAudioPipeline:
@@ -152,7 +153,7 @@ class PaperToAudioPipeline:
         print(f"\n[INFO] Found {len(text_files)} text files for TTS", file=sys.stderr)
 
         success_count = 0
-        for text_file in text_files:
+        for text_file in tqdm(text_files, desc="Generating audio", file=sys.stderr):
             if self.run_tts(text_file):
                 success_count += 1
 
