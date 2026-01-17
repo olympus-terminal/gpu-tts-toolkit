@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import List
 
 import fitz  # PyMuPDF
+from tqdm import tqdm
 
 class PDFTextExtractor:
     """Extract and clean PDF text for TTS readability."""
@@ -234,7 +235,7 @@ class PDFTextExtractor:
         print(f"{'='*60}", file=sys.stderr)
 
         results = []
-        for pdf_path in pdf_files:
+        for pdf_path in tqdm(pdf_files, desc="Processing PDFs", file=sys.stderr):
             output_path = output_dir / f"{pdf_path.stem}.txt"
             success = self.process_file(pdf_path, output_path)
             results.append({

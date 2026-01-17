@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Optional, Dict, List
 from urllib.parse import quote
 import re
+from tqdm import tqdm
 
 class PaperDownloader:
     """Download academic paper PDFs from open access sources."""
@@ -272,7 +273,7 @@ class PaperDownloader:
         print(f"Output directory: {self.output_dir}", file=sys.stderr)
         print(f"{'='*60}", file=sys.stderr)
 
-        for paper in papers:
+        for paper in tqdm(papers, desc="Downloading papers", file=sys.stderr):
             # Check if already downloaded
             existing = self.is_already_downloaded(paper)
             if existing:
