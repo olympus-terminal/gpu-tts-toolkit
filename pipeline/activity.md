@@ -30,5 +30,10 @@
 - Verified field types are correct (strings, lists, ints as expected)
 - Ran second query ('CRISPR gene editing') to confirm API stability - no errors
 - Task 6 complete
+- Tested full pipeline end-to-end with query 'bioremediation open access' --papers 3
+- Pipeline successfully: searched APIs → downloaded 2/3 PDFs (Europe PMC) → extracted text → generated TTS audio
+- Produced 2 valid MP3 files: 57.23 MB and 60.09 MB with proper MP3 headers
+- Verified entire flow works: paper_search.py → paper_download.py → pdf_to_text.py → deep_voice_tts.py
+- Task 7 complete
 
 ---
