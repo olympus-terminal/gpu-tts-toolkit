@@ -7,12 +7,63 @@ Text-to-speech tools using GPU acceleration. Useful for converting papers and do
 [![GitHub issues](https://img.shields.io/github/issues/olympus-terminal/gpu-tts-toolkit)](https://github.com/olympus-terminal/gpu-tts-toolkit/issues)
 [![GitHub last commit](https://img.shields.io/github/last-commit/olympus-terminal/gpu-tts-toolkit)](https://github.com/olympus-terminal/gpu-tts-toolkit/commits/main)
 [![Tools](https://img.shields.io/badge/tools-20+-green.svg)](https://github.com/olympus-terminal/gpu-tts-toolkit)
-[![Python](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org)
-[![CUDA](https://img.shields.io/badge/CUDA-11.0+-76B900.svg)](https://developer.nvidia.com/cuda-toolkit)
+[![Python](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org)
+[![CUDA](https://img.shields.io/badge/CUDA-12.9+-76B900.svg)](https://developer.nvidia.com/cuda-toolkit)
 
 ## Overview
 
 Text-to-speech scripts optimized for GPU use. Designed for processing scientific papers, documentation, and other text on local hardware.
+
+## Qwen3-TTS (NEW)
+
+The latest addition: **Qwen3-TTS** - Alibaba's state-of-the-art TTS model with voice cloning and custom voice design.
+
+### Quick Install (DGX Spark / High VRAM)
+
+```bash
+git clone https://github.com/olympus-terminal/gpu-tts-toolkit.git
+cd gpu-tts-toolkit
+./install_dgx.sh
+```
+
+### Quick Usage
+
+```bash
+conda activate qwen3-tts
+python deep_voice_tts_v3.py input.txt --voice dylan --model-size 1.7B
+```
+
+### Available Voices
+
+| Voice | Description | Type |
+|-------|-------------|------|
+| `dylan` | Deep American male | Favorite |
+| `eric` | Mature male voice | Favorite |
+| `ryan` | Clear male voice | Favorite |
+| `uncle_fu` | Deep Chinese male | Favorite |
+| `aiden` | Young adult male | Standard |
+| `vivian` | Clear female | Standard |
+| `serena` | Warm female | Standard |
+
+### Model Sizes
+
+| Model | VRAM Required | Quality |
+|-------|---------------|---------|
+| 0.6B | ~8GB | Good |
+| 1.7B | ~16GB | Best |
+
+### Advanced Features
+
+```bash
+# Voice cloning
+python deep_voice_tts_v3.py input.txt --clone-audio ref.wav --clone-text "Reference transcript"
+
+# Voice design
+python deep_voice_tts_v3.py input.txt --design "A deep, authoritative male voice with slight British accent"
+
+# Custom instruction
+python deep_voice_tts_v3.py input.txt --voice dylan --instruct "Speak slowly with gravitas"
+```
 
 ### Key Features
 
