@@ -17,6 +17,7 @@ import unicodedata
 import numpy as np
 import shutil
 import soundfile as sf
+from collections import Counter
 
 
 class DeepVoiceTTS:
@@ -37,6 +38,20 @@ class DeepVoiceTTS:
         "sohee": {"speaker": "Sohee", "description": "Korean female", "instruct": "Speak naturally"},
     }
 
+    # Cloned voice profiles (reference audio + transcript)
+    CLONED_VOICES = {
+        "mm": {
+            "description": "Matthew McConaughey clone",
+            "reference_audio": "voice_references/mcconaughey_reference.wav",
+            "reference_text": "voice_references/mcconaughey_transcript.txt",
+        },
+        "wh": {
+            "description": "Werner Herzog clone",
+            "reference_audio": "voice_references/herzog_reference.wav",
+            "reference_text": "voice_references/herzog_transcript.txt",
+        },
+    }
+
     # Favorite deep male voices for random selection
     FAVORITE_VOICES = ["dylan", "eric", "ryan", "uncle_fu"]
 
@@ -51,6 +66,8 @@ class DeepVoiceTTS:
         reference_audio=None,
         reference_text=None,
         voice_description=None,
+        cpu_offload=False,
+        speed=1.0,
     ):
         """
         Initialize Qwen3-TTS pipeline
@@ -65,6 +82,8 @@ class DeepVoiceTTS:
             reference_audio: Path to reference audio for voice cloning
             reference_text: Transcript of reference audio
             voice_description: Text description for voice design
+            cpu_offload: Enable CPU offloading for low VRAM systems
+            speed: Playback speed multiplier (0.5-2.0, default 1.0)
         """
         # GPU only - no CPU fallback
         if not torch.cuda.is_available():
@@ -79,6 +98,8 @@ class DeepVoiceTTS:
         self.reference_audio = reference_audio
         self.reference_text = reference_text
         self.voice_description = voice_description
+        self.cpu_offload = cpu_offload
+        self.speed = max(0.5, min(2.0, speed))  # Clamp to valid range
 
         # Determine model type and voice settings
         self.mode = self._determine_mode(voice_profile)
@@ -118,6 +139,8 @@ class DeepVoiceTTS:
         print(f"Model: Qwen3-TTS-12Hz-{model_size}")
         print(f"Device: {self.device}")
         print(f"FlashAttention 2: {'enabled' if use_flash_attn else 'disabled'}")
+        print(f"CPU Offload: {'enabled' if cpu_offload else 'disabled'}")
+        print(f"Speed: {self.speed:.0%}")
         print(f"Cleanup: {'enabled' if cleanup else 'disabled'}")
 
         self.load_model()
@@ -147,6 +170,36 @@ class DeepVoiceTTS:
                 "description": f"Designed voice: {self.voice_description[:50]}..."
             }
         else:
+            # Check for cloned voices first
+            voice_key = voice_profile.lower()
+            if voice_key in self.CLONED_VOICES:
+                cloned = self.CLONED_VOICES[voice_key]
+                # Resolve paths relative to script directory
+                script_dir = Path(__file__).parent
+                ref_audio = script_dir / cloned["reference_audio"]
+                ref_text_path = script_dir / cloned["reference_text"]
+
+                if not ref_audio.exists():
+                    raise FileNotFoundError(f"Reference audio not found: {ref_audio}")
+                if not ref_text_path.exists():
+                    raise FileNotFoundError(f"Reference transcript not found: {ref_text_path}")
+
+                # Read transcript
+                with open(ref_text_path, 'r', encoding='utf-8') as f:
+                    ref_text = f.read().strip()
+
+                # Set clone mode
+                self.reference_audio = str(ref_audio)
+                self.reference_text = ref_text
+                self.mode = "clone"
+
+                return {
+                    "type": "clone",
+                    "reference_audio": str(ref_audio),
+                    "reference_text": ref_text,
+                    "description": cloned["description"]
+                }
+
             # Built-in voice mode
             if voice_profile == "random":
                 import random
@@ -168,7 +221,7 @@ class DeepVoiceTTS:
                 return profile
 
     def load_model(self):
-        """Load Qwen3-TTS model"""
+        """Load Qwen3-TTS model with optional memory optimization"""
         try:
             from qwen_tts import Qwen3TTSModel
         except ImportError:
@@ -189,24 +242,39 @@ class DeepVoiceTTS:
         # Configure attention implementation
         attn_impl = "flash_attention_2" if self.use_flash_attn else "sdpa"
 
+        # Build kwargs for model loading
+        load_kwargs = {
+            "attn_implementation": attn_impl,
+        }
+
+        # Use bfloat16 for efficiency
+        load_kwargs["torch_dtype"] = torch.bfloat16
+
+        # Configure device mapping
+        if self.cpu_offload:
+            # Use auto device map for CPU offloading - splits model across GPU/CPU
+            load_kwargs["device_map"] = "auto"
+            load_kwargs["max_memory"] = {0: "10GiB", "cpu": "32GiB"}
+            print("Using automatic device mapping with CPU offloading...")
+        else:
+            load_kwargs["device_map"] = self.device
+
         try:
-            self.model = Qwen3TTSModel.from_pretrained(
-                model_name,
-                device_map=self.device,
-                dtype=torch.bfloat16,
-                attn_implementation=attn_impl
-            )
-            print(f"Model loaded successfully on {self.device}")
+            self.model = Qwen3TTSModel.from_pretrained(model_name, **load_kwargs)
+            print(f"Model loaded successfully")
+
+            # Report memory usage
+            if torch.cuda.is_available():
+                allocated = torch.cuda.memory_allocated() / 1024**3
+                reserved = torch.cuda.memory_reserved() / 1024**3
+                print(f"GPU memory: {allocated:.1f}GB allocated, {reserved:.1f}GB reserved")
+
         except Exception as e:
             if "flash" in str(e).lower():
                 print("FlashAttention 2 failed, falling back to SDPA...")
-                self.model = Qwen3TTSModel.from_pretrained(
-                    model_name,
-                    device_map=self.device,
-                    dtype=torch.bfloat16,
-                    attn_implementation="sdpa"
-                )
-                print(f"Model loaded with SDPA on {self.device}")
+                load_kwargs["attn_implementation"] = "sdpa"
+                self.model = Qwen3TTSModel.from_pretrained(model_name, **load_kwargs)
+                print(f"Model loaded with SDPA")
             else:
                 raise
 
@@ -218,9 +286,9 @@ class DeepVoiceTTS:
         """Pre-compute voice clone prompt for efficiency"""
         print(f"Preparing voice clone from: {self.reference_audio}")
         try:
-            self.clone_prompt = self.model.prepare_clone_prompt(
-                reference_audio=self.reference_audio,
-                reference_text=self.reference_text
+            self.clone_prompt = self.model.create_voice_clone_prompt(
+                ref_audio=self.reference_audio,
+                ref_text=self.reference_text
             )
             print("Voice clone prompt prepared")
         except Exception as e:
@@ -338,9 +406,9 @@ class DeepVoiceTTS:
         """Generate audio for a text chunk"""
         try:
             if self.mode == "clone":
-                wavs, sr = self.model.generate_clone(
+                wavs, sr = self.model.generate_voice_clone(
                     text=text,
-                    clone_prompt=self.clone_prompt,
+                    voice_clone_prompt=self.clone_prompt,
                     language="English"
                 )
             elif self.mode == "design":
@@ -358,13 +426,144 @@ class DeepVoiceTTS:
                     instruct=self.voice_profile.get("instruct", "")
                 )
 
-            # Save audio
-            sf.write(output_path, wavs[0].cpu().numpy(), sr)
+            # Save audio - handle both tensor and numpy array outputs
+            audio_data = wavs[0]
+            if hasattr(audio_data, 'cpu'):
+                audio_data = audio_data.cpu().numpy()
+            sf.write(output_path, audio_data, sr)
             return True
 
         except Exception as e:
             print(f"Error generating audio: {e}")
             return False
+
+    def detect_hallucinations(self, audio_path):
+        """Detect repetitive/hallucinated segments in generated audio"""
+        try:
+            from faster_whisper import WhisperModel
+        except ImportError:
+            print("Warning: faster-whisper not installed, skipping hallucination detection")
+            return []
+
+        print("Scanning for audio hallucinations...")
+
+        # Use small model for speed
+        model = WhisperModel("base", device="cuda", compute_type="float16")
+        segments, _ = model.transcribe(str(audio_path), word_timestamps=True)
+        segments = list(segments)
+
+        if not segments:
+            return []
+
+        # Detect repetitions
+        hallucinations = []
+        texts = [s.text.strip().lower() for s in segments]
+
+        # Sliding window to find repeated phrases
+        i = 0
+        while i < len(texts):
+            phrase = texts[i]
+            if len(phrase) < 3:  # Skip very short segments
+                i += 1
+                continue
+
+            # Count consecutive repetitions
+            repeat_count = 1
+            j = i + 1
+            while j < len(texts) and self._similar_text(phrase, texts[j]):
+                repeat_count += 1
+                j += 1
+
+            # If repeated 3+ times, mark as hallucination
+            if repeat_count >= 3:
+                start_time = segments[i].start
+                end_time = segments[j-1].end
+                hallucinations.append({
+                    "start": start_time,
+                    "end": end_time,
+                    "phrase": phrase,
+                    "repeats": repeat_count
+                })
+                print(f"  Found hallucination: '{phrase[:30]}...' x{repeat_count} ({start_time:.1f}s - {end_time:.1f}s)")
+                i = j
+            else:
+                i += 1
+
+        # Also detect rapid-fire short segments (babbling)
+        for i in range(len(segments) - 5):
+            window = segments[i:i+6]
+            durations = [s.end - s.start for s in window]
+            avg_duration = sum(durations) / len(durations)
+
+            # If 6 consecutive segments are all very short (<0.5s avg), likely babbling
+            if avg_duration < 0.5 and all(d < 0.8 for d in durations):
+                start_time = window[0].start
+                end_time = window[-1].end
+                # Check if not already marked
+                if not any(h["start"] <= start_time <= h["end"] for h in hallucinations):
+                    hallucinations.append({
+                        "start": start_time,
+                        "end": end_time,
+                        "phrase": "[rapid babbling]",
+                        "repeats": 0
+                    })
+                    print(f"  Found babbling: {start_time:.1f}s - {end_time:.1f}s")
+
+        return hallucinations
+
+    def _similar_text(self, a, b, threshold=0.8):
+        """Check if two texts are similar (for detecting repetitions)"""
+        if not a or not b:
+            return False
+        # Simple similarity: shared words ratio
+        words_a = set(a.split())
+        words_b = set(b.split())
+        if not words_a or not words_b:
+            return a == b
+        intersection = len(words_a & words_b)
+        union = len(words_a | words_b)
+        return (intersection / union) >= threshold if union > 0 else False
+
+    def clean_hallucinations(self, audio_path, hallucinations):
+        """Remove hallucinated segments from audio"""
+        if not hallucinations:
+            return audio_path
+
+        print(f"Removing {len(hallucinations)} hallucinated segments...")
+
+        audio = AudioSegment.from_file(str(audio_path))
+
+        # Sort hallucinations by start time (reverse to remove from end first)
+        hallucinations = sorted(hallucinations, key=lambda x: x["start"], reverse=True)
+
+        for h in hallucinations:
+            start_ms = int(h["start"] * 1000)
+            end_ms = int(h["end"] * 1000)
+
+            # Keep audio before and after the hallucination
+            before = audio[:start_ms]
+            after = audio[end_ms:]
+
+            # Add small crossfade to smooth the cut
+            if len(before) > 50 and len(after) > 50:
+                audio = before.append(after, crossfade=50)
+            else:
+                audio = before + after
+
+        # Save cleaned audio
+        cleaned_path = Path(audio_path).with_suffix('.cleaned' + Path(audio_path).suffix)
+
+        if str(audio_path).endswith('.mp3'):
+            audio.export(str(cleaned_path), format="mp3", bitrate="192k")
+        else:
+            audio.export(str(cleaned_path), format="wav")
+
+        # Replace original with cleaned
+        Path(audio_path).unlink()
+        cleaned_path.rename(audio_path)
+
+        print(f"Cleaned audio saved: {audio_path}")
+        return audio_path
 
     def cleanup_intermediate_files(self, chunks_dir, output_dir):
         """Remove intermediate chunk files after successful generation"""
@@ -471,12 +670,29 @@ class DeepVoiceTTS:
 
                 combined = combined.normalize()
 
+                # Apply speed adjustment if not 1.0
+                if self.speed != 1.0:
+                    print(f"Adjusting speed to {self.speed:.0%}...")
+                    # Change speed by altering frame rate then converting back
+                    new_frame_rate = int(combined.frame_rate * self.speed)
+                    combined = combined._spawn(combined.raw_data, overrides={
+                        "frame_rate": new_frame_rate
+                    }).set_frame_rate(combined.frame_rate)
+
                 if self.output_format == "mp3":
                     combined.export(final_output, format="mp3", bitrate="192k")
                 else:
                     combined.export(final_output, format="wav")
 
                 print(f"Final audio: {final_output}")
+
+                # Detect and clean hallucinations
+                hallucinations = self.detect_hallucinations(final_output)
+                if hallucinations:
+                    self.clean_hallucinations(final_output, hallucinations)
+                    metadata["hallucinations_removed"] = len(hallucinations)
+                else:
+                    print("No hallucinations detected")
 
                 file_size = final_output.stat().st_size / (1024 * 1024)
                 metadata["file_size_mb"] = round(file_size, 2)
@@ -520,7 +736,14 @@ Examples:
   # Custom voice instruction
   python deep_voice_tts_v3.py input.txt --voice dylan --instruct "Speak slowly with gravitas"
 
-Available voices: dylan, eric, ryan, aiden, uncle_fu, vivian, serena, ono_anna, sohee
+Memory optimization (for limited VRAM):
+  # Use smaller 0.6B model (recommended for 8-12GB VRAM)
+  python deep_voice_tts_v3.py input.txt --voice dylan --model-size 0.6B
+
+  # CPU offloading (splits model across GPU and CPU)
+  python deep_voice_tts_v3.py input.txt --voice dylan --cpu-offload
+
+Available voices: dylan, eric, ryan, aiden, uncle_fu, vivian, serena, ono_anna, sohee, mm (McConaughey), wh (Herzog)
         """
     )
 
@@ -537,6 +760,14 @@ Available voices: dylan, eric, ryan, aiden, uncle_fu, vivian, serena, ono_anna, 
     parser.add_argument("--no-flash-attn", action="store_true",
                        help="Disable FlashAttention 2")
     parser.add_argument("--instruct", help="Custom voice instruction")
+
+    # Memory optimization options
+    parser.add_argument("--cpu-offload", action="store_true",
+                       help="Enable CPU offloading for low VRAM GPUs")
+
+    # Audio options
+    parser.add_argument("--speed", type=float, default=1.0,
+                       help="Playback speed (0.5-2.0, default 1.0). Use 0.8 for slower speech.")
 
     # Voice cloning options
     parser.add_argument("--clone-audio", help="Reference audio for voice cloning")
@@ -560,8 +791,11 @@ Available voices: dylan, eric, ryan, aiden, uncle_fu, vivian, serena, ono_anna, 
         for name, info in DeepVoiceTTS.BUILTIN_VOICES.items():
             if name not in DeepVoiceTTS.FAVORITE_VOICES:
                 print(f"  {name:12} - {info['description']}")
+        print("\nCloned voices:")
+        for name, info in DeepVoiceTTS.CLONED_VOICES.items():
+            print(f"  {name:12} - {info['description']}")
         print("\nModes:")
-        print("  --voice <name>    Use built-in voice")
+        print("  --voice <name>    Use built-in or cloned voice")
         print("  --clone-audio/--clone-text    Clone from reference")
         print("  --design \"description\"    Design voice from text")
         return
@@ -590,6 +824,8 @@ Available voices: dylan, eric, ryan, aiden, uncle_fu, vivian, serena, ono_anna, 
             reference_audio=args.clone_audio,
             reference_text=args.clone_text,
             voice_description=args.design,
+            cpu_offload=args.cpu_offload,
+            speed=args.speed,
         )
     except Exception as e:
         print(f"\nError initializing TTS pipeline: {e}")
