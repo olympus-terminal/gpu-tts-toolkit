@@ -89,7 +89,9 @@ python deep_voice_tts_v3.py input.txt --voice dylan --instruct "Speak slowly wit
 
 ```
 gpu-tts-toolkit/
-├── deep_voice_tts.py           # Main TTS script
+├── deep_voice_tts.py           # TTS engine (text → audio)
+├── deep_voice_tts_v2.py        # V2: PDF/LaTeX/TXT → audio in one step
+├── extract_salient_text.py     # Scientific manuscript text extractor
 ├── improved_tts_pipeline.py    # Enhanced pipeline
 ├── core-engines/
 │   └── synthesis/              # TTS synthesis scripts
@@ -195,6 +197,41 @@ python deep_voice_tts.py input.txt --format mp3
 # Force CPU (if GPU issues)
 python deep_voice_tts.py input.txt --device cpu
 ```
+
+### V2: Direct PDF/LaTeX Input
+
+`deep_voice_tts_v2.py` accepts `.pdf`, `.tex`, and `.txt` files directly — no separate extraction step required. It integrates the scientific text extraction from `extract_salient_text.py` and feeds the cleaned output straight to the TTS engine.
+
+```bash
+# Plain text (same as v1)
+python deep_voice_tts_v2.py paper.txt --voice p240
+
+# LaTeX manuscript → audio (one command)
+python deep_voice_tts_v2.py main.tex --voice p240
+
+# PDF manuscript → audio (one command)
+python deep_voice_tts_v2.py main.pdf --voice p240
+
+# Preview extracted text without GPU
+python deep_voice_tts_v2.py main.tex --preview 500
+
+# Filter sections
+python deep_voice_tts_v2.py main.tex --voice p240 --include-sections "SUMMARY,RESULTS"
+python deep_voice_tts_v2.py main.tex --voice p240 --exclude-sections "Limitations of the study"
+
+# Strip verbose statistics from scientific text
+python deep_voice_tts_v2.py main.tex --voice p240 --strip-heavy-stats
+```
+
+| Option | Description |
+|--------|-------------|
+| `--preview N` | Print first N extracted characters and exit (no GPU needed) |
+| `--include-sections` | Comma-separated sections to keep (or `ALL`) |
+| `--exclude-sections` | Comma-separated additional sections to exclude |
+| `--strip-heavy-stats` | Remove parenthesized statistical details |
+| `--keep-figure-refs` | Keep figure/table references in output text |
+
+All standard TTS options (`--voice`, `--format`, `--device`, `--list-voices`, `--output-name`) work the same as v1.
 
 ### Batch Processing
 

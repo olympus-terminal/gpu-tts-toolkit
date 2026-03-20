@@ -6,6 +6,7 @@ Enhanced acronym detection and voice variety
 
 import os
 import re
+import shutil
 import torch
 from pathlib import Path
 from TTS.api import TTS
@@ -472,18 +473,24 @@ class DeepVoiceTTS:
                     combined.export(final_output, format="wav")
                 
                 print(f"✓ Final audio: {final_output}")
-                
+
                 file_size = final_output.stat().st_size / (1024 * 1024)
                 metadata["file_size_mb"] = round(file_size, 2)
                 print(f"📊 Size: {file_size:.2f} MB")
-                
+
+                # Clean up intermediate chunk files
+                print("🧹 Cleaning up intermediate chunks...")
+                shutil.rmtree(chunks_dir)
+                print("✓ Chunks deleted")
+
             except Exception as e:
                 print(f"Error combining: {e}")
-        
+                print("⚠️ Keeping chunks due to error")
+
         # Save metadata
         with open(output_dir / "metadata.json", 'w') as f:
             json.dump(metadata, f, indent=2)
-        
+
         print(f"\n✅ Complete! Output: {output_dir}")
         return str(output_dir)
 
