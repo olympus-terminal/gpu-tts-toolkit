@@ -163,6 +163,7 @@ class MathToSpeech:
 # Default sections to include (case-insensitive matching)
 DEFAULT_INCLUDE = [
     'SUMMARY', 'ABSTRACT', 'INTRODUCTION', 'RESULTS', 'DISCUSSION',
+    'CONCLUSIONS', 'CONCLUSION',
 ]
 
 # Default sections to exclude
@@ -174,9 +175,16 @@ DEFAULT_EXCLUDE = [
     'DECLARATION OF GENERATIVE AI AND AI-ASSISTED TECHNOLOGIES',
     'DECLARATIONS',
     'SUPPLEMENTAL INFORMATION', 'SUPPLEMENTARY INFORMATION',
+    'SUPPLEMENTARY FIGURES', 'SUPPLEMENTARY TABLES',
     'STAR METHODS', 'METHODS', 'MATERIALS AND METHODS',
+    'MATERIAL AND METHODS',
+    'EXPERIMENTAL', 'EXPERIMENTAL PROCEDURES',
     'REFERENCES', 'BIBLIOGRAPHY',
     'DATA AVAILABILITY', 'CODE AVAILABILITY',
+    'RESOURCE AVAILABILITY',
+    'CONFLICT OF INTEREST', 'CONFLICTS OF INTEREST',
+    'COMPETING INTERESTS',
+    'FUNDING',
 ]
 
 def should_include_section(name: str, include: list, exclude: list,
@@ -561,6 +569,9 @@ class PDFSalientExtractor:
 
         # Compiled patterns (reused from pipeline/pdf_to_text.py)
         self._numeric_citations = re.compile(r'\[\d+(?:\s*[-–,]\s*\d+)*\]')
+        # Parenthesized numeric citations: (1–4), (15, 18, 19), (7, 9–14)
+        self._paren_numeric_citations = re.compile(
+            r'\(\s*\d+\s*(?:[-–,]\s*\d+\s*)*\)')
         self._author_year_citations = re.compile(
             r'\([A-Z][a-zA-Z\-\']+(?:\s+(?:et\s+al\.?|&|and)\s*)?(?:,?\s*\d{4}[a-z]?)\)',
             re.IGNORECASE)
@@ -570,18 +581,49 @@ class PDFSalientExtractor:
         self._urls = re.compile(r'https?://[^\s<>"{}|\\^`\[\]]+')
         self._dois = re.compile(r'(?:doi:\s*)?10\.\d{4,}/[^\s]+', re.IGNORECASE)
         self._emails = re.compile(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b')
+        # Figure refs: Figure 1, Fig. 2a, Figures 3A-C, Figures S2 and S3
         self._figure_refs = re.compile(
-            r'\b(?:Figure|Fig\.?)\s*\d+[a-z]?(?:\s*[-–]\s*\d+[a-z]?)?', re.IGNORECASE)
+            r'\b(?:Figures?|Figs?\.?)\s*[S]?\d+[A-Za-z]?'
+            r'(?:\s*[-–,]\s*(?:[A-Za-z]|\d+[A-Za-z]?))*'
+            r'(?:\s+(?:and|&)\s+[S]?\d+[A-Za-z]?'
+            r'(?:\s*[-–,]\s*(?:[A-Za-z]|\d+[A-Za-z]?))*)*',
+            re.IGNORECASE)
         self._table_refs = re.compile(
-            r'\bTables?\s*[S]?\d+[a-z]?(?:\s*[-–]\s*[S]?\d+[a-z]?)?', re.IGNORECASE)
+            r'\bTables?\s*[S]?\d+[A-Za-z]?'
+            r'(?:\s*[-–,]\s*[S]?\d+[A-Za-z]?)*'
+            r'(?:\s+(?:and|&)\s+[S]?\d+[A-Za-z]?'
+            r'(?:\s*[-–,]\s*[S]?\d+[A-Za-z]?)*)*',
+            re.IGNORECASE)
         self._supplementary_refs = re.compile(
-            r'\bSupplementary\s+(?:Figure|Fig\.?|Table|Material|Information|Data)s?\s*[S]?\d*',
+            r'\b(?:Supplementary|Supplemental)\s+'
+            r'(?:Figures?|Fig\.?|Tables?|Materials?|Information|Data|Text|Files?)\s*'
+            r'[S]?\d*[A-Za-z]?(?:\s*[-–,]\s*[S]?\d*[A-Za-z]?)*'
+            r'(?:\s+(?:and|&)\s+[S]?\d*[A-Za-z]?(?:\s*[-–,]\s*[S]?\d*[A-Za-z]?)*)*',
             re.IGNORECASE)
         self._page_numbers = re.compile(r'^\s*\d{1,4}\s*$', re.MULTILINE)
         self._copyright = re.compile(
             r'(?:copyright|\u00a9|©)\s*(?:\d{4})?.*?(?:all rights reserved|license)?',
             re.IGNORECASE)
         self._hyphenation = re.compile(r'(\w+)-\n(\w+)')
+
+        # bioRxiv / medRxiv / preprint server boilerplate
+        self._preprint_boilerplate = re.compile(
+            r'\.?\s*CC-BY(?:-NC)?(?:-ND)?\s+\d\.\d\s+International\s+license'
+            r'.*?bioRxiv\s+preprint\s*',
+            re.DOTALL | re.IGNORECASE)
+        self._preprint_boilerplate_alt = re.compile(
+            r'\(?which was not certified by peer review\)?'
+            r'.*?(?:bioRxiv|medRxiv)\s+preprint\s*',
+            re.DOTALL | re.IGNORECASE)
+        self._preprint_doi_line = re.compile(
+            r'^\s*(?:doi:\s*)?(?:https?://doi\.org/)?10\.\d+/.*$', re.MULTILINE)
+        self._preprint_version_line = re.compile(
+            r'this version posted\s+\w+\s+\d{1,2},?\s+\d{4}\s*\.?\s*;?\s*',
+            re.IGNORECASE)
+
+        # Figure panel labels: standalone "A B", "A B C D", single letters on lines
+        self._figure_panel_labels = re.compile(
+            r'^\s*(?:[A-H]\s+){1,8}[A-H]?\s*$', re.MULTILINE)
 
         # Line number detection: lines starting with bare numbers 1-999
         # that appear sequentially (common in manuscripts with \linenumbers)
@@ -612,43 +654,63 @@ class PDFSalientExtractor:
 
         stats = {'raw_chars': len(raw)}
 
-        # 2. Strip line numbers
-        text = self._strip_line_numbers(raw)
+        # 2. Strip preprint server boilerplate (before anything else)
+        text = self._strip_preprint_boilerplate(raw)
 
-        # 3. Fix hyphenation at line breaks
+        # 3. Strip line numbers
+        text = self._strip_line_numbers(text)
+
+        # 4. Fix hyphenation at line breaks
         text = self._hyphenation.sub(r'\1\2', text)
 
-        # 4. Detect sections
+        # 5. Remove figure panel labels (standalone A B C D lines)
+        text = self._figure_panel_labels.sub('', text)
+
+        # 6. Detect sections
         sections = self._detect_sections(text)
 
-        # 5. Remove figure captions (multi-line blocks starting with "Figure N.")
+        # 7. Remove figure captions (multi-line blocks starting with "Figure N.")
         cleaned_sections = OrderedDict()
         for name, body in sections.items():
+            # Multi-line figure captions: "Figure 1. ..." up to next blank line
             body = re.sub(
-                r'^Figure\s+\d+[A-Za-z]?\.\s.*?(?=\n\n|\Z)',
+                r'^(?:Figure|Fig\.?)\s+[S]?\d+[A-Za-z]?\.\s.*?(?=\n\n|\Z)',
                 '', body, flags=re.MULTILINE | re.DOTALL)
             body = re.sub(
                 r'^Table\s+[S]?\d+\.\s.*?(?=\n\n|\Z)',
                 '', body, flags=re.MULTILINE | re.DOTALL)
+            # Parenthesized figure captions: "(A) description ... (B) ..." blocks
+            body = re.sub(
+                r'^\([A-H]\)\s.*?(?=\n\n|\Z)',
+                '', body, flags=re.MULTILINE | re.DOTALL)
             cleaned_sections[name] = body
 
-        # 6. Apply section filter
+        # 8. Apply section filter
+        # PDF headings may be mixed case (e.g. "Introduction" not "INTRODUCTION")
+        # so check every section against include/exclude regardless of case
         filtered = OrderedDict()
         parent_included = False
         for name, body in cleaned_sections.items():
-            level = 1 if name.upper() == name else 2
-            if level == 1:
-                parent_included = should_include_section(
-                    name, inc, exc, include_all)
-                if parent_included:
-                    filtered[name] = body
-            else:
-                if parent_included:
-                    upper = name.upper().strip()
-                    explicitly_excluded = any(
-                        upper == ex or upper.startswith(ex) for ex in exc)
-                    if not explicitly_excluded:
-                        filtered[name] = body
+            upper = name.upper().strip()
+            # Strip trailing punctuation for matching (e.g. "methods." -> "METHODS")
+            upper_clean = upper.rstrip('.:;,')
+            # Check if this section directly matches include/exclude lists
+            directly_matches_include = any(
+                upper_clean == inc_name or upper_clean.startswith(inc_name)
+                for inc_name in inc)
+            directly_excluded = any(
+                upper_clean == ex or upper_clean.startswith(ex) for ex in exc)
+
+            if directly_excluded:
+                parent_included = False
+                continue
+
+            if include_all or directly_matches_include:
+                filtered[name] = body
+                parent_included = True
+            elif parent_included:
+                # Subsection of an included parent
+                filtered[name] = body
 
         stats['total_sections'] = len(cleaned_sections)
         stats['kept_sections'] = len(filtered)
@@ -672,6 +734,28 @@ class PDFSalientExtractor:
         stats['output_words'] = len(result.split())
 
         return result.strip(), stats
+
+    def _strip_preprint_boilerplate(self, text: str) -> str:
+        """Remove bioRxiv/medRxiv page header/footer boilerplate."""
+        # Primary pattern: "CC-BY... license ... bioRxiv preprint"
+        text = self._preprint_boilerplate.sub('', text)
+        # Alternate pattern if primary didn't catch it
+        text = self._preprint_boilerplate_alt.sub('', text)
+        # Version/date lines: "this version posted March 23, 2026."
+        text = self._preprint_version_line.sub('', text)
+        # Standalone "doi:" lines
+        text = re.sub(r'^\s*doi:\s*$', '', text, flags=re.MULTILINE)
+        # Standalone "bioRxiv preprint" or "medRxiv preprint" lines
+        text = re.sub(r'^\s*(?:bioRxiv|medRxiv)\s+preprint\s*$', '', text, flags=re.MULTILINE)
+        # "The copyright holder for this preprint" line
+        text = re.sub(
+            r'^\s*The\s+copyright\s+holder\s+for\s+this\s+preprint\s*$',
+            '', text, flags=re.MULTILINE | re.IGNORECASE)
+        # "available under a" (orphaned CC license fragment)
+        text = re.sub(r'^\s*available\s+under\s+a\s*$', '', text, flags=re.MULTILINE)
+        # Orphaned semicolons on their own line (left after DOI removal)
+        text = re.sub(r'^\s*;\s*$', '', text, flags=re.MULTILINE)
+        return text
 
     def _strip_line_numbers(self, text: str) -> str:
         """Remove sequential line numbers from manuscript PDFs.
@@ -719,10 +803,20 @@ class PDFSalientExtractor:
         current_section = '_preamble'
         current_lines = []
 
+        # Patterns to reject as headings
+        dna_like = re.compile(r'^[ACGTUN\s]+$', re.IGNORECASE)
+        # Accession numbers: ERR1726872, ERS1800270, MGYS00005779, etc.
+        accession_like = re.compile(
+            r'^[A-Z]{2,5}\d{4,}(?:[-–][A-Z]{0,5}\d{4,})?'
+            r'(?:[,\s]+[A-Z]{0,5}\d{4,}(?:[-–][A-Z]{0,5}\d{4,})?)*$')
+        # Numbered section headings: "1. Introduction", "2.1 Background", "3.1.2 Methods"
+        numbered_heading = re.compile(
+            r'^(\d{1,2}\.(?:\d{1,2}\.?)*)\s+([A-Z][A-Za-z\s:,\-–—()]+)$')
+
         for line in lines:
             stripped = line.strip()
             upper = stripped.upper()
-            # Check if this line is a section heading
+            # Check if this line is a known section heading
             matched = False
             for heading in self.HEADING_PATTERNS:
                 if upper == heading or (upper.startswith(heading) and len(upper) < len(heading) + 5):
@@ -733,19 +827,38 @@ class PDFSalientExtractor:
                     current_lines = []
                     matched = True
                     break
-            # Also detect subsection-like headings (Title Case, short, on own line)
+            # Detect numbered headings: "1. Introduction", "2.1 Background"
+            if not matched:
+                m = numbered_heading.match(stripped)
+                if m:
+                    heading_title = m.group(2).strip()
+                    if len(heading_title) >= 3:
+                        if current_lines:
+                            sections[current_section] = '\n'.join(current_lines)
+                        current_section = heading_title
+                        current_lines = []
+                        matched = True
+
+            # Heuristic: detect additional ALL-CAPS headings not in the known list
+            # Must be multi-word (>=2 words with >=3 alpha chars each) to avoid
+            # false positives on acronyms, gene names, accession numbers, etc.
             if not matched and len(stripped) > 3 and len(stripped) < 120:
-                # Heuristic: line is a heading if it's title-case-ish and followed
-                # by content (we can't look ahead easily, so use pattern matching)
+                # Skip DNA sequences, accession numbers
+                if dna_like.match(stripped) or accession_like.match(stripped):
+                    current_lines.append(line)
+                    continue
                 if (stripped[0].isupper() and
                         not stripped.endswith('.') and
                         not stripped.endswith(',') and
                         stripped.count(' ') < 15 and
                         re.match(r'^[A-Z][A-Za-z0-9\s:,\-–—()]+$', stripped)):
-                    # Could be a subsection heading — only if it matches known sub-patterns
-                    # or is distinctly heading-like (all caps or title case with few words)
                     words = stripped.split()
-                    if len(words) <= 12 and all(c.isupper() for c in stripped if c.isalpha()):
+                    alpha_only = [c for c in stripped if c.isalpha()]
+                    if (len(words) >= 2 and
+                            len(words) <= 12 and
+                            all(c.isupper() for c in alpha_only) and
+                            # At least one word has 3+ alpha chars (not just "A B")
+                            any(sum(1 for c in w if c.isalpha()) >= 3 for w in words)):
                         if current_lines:
                             sections[current_section] = '\n'.join(current_lines)
                         current_section = stripped
@@ -765,8 +878,10 @@ class PDFSalientExtractor:
         """Clean a PDF section body for TTS."""
         text = body
 
-        # Remove citations
+        # Remove citations: [1-4], [15, 18, 19]
         text = self._numeric_citations.sub('', text)
+        # Parenthesized numeric citations: (1–4), (15, 18, 19), (7, 9–14)
+        text = self._paren_numeric_citations.sub('', text)
         text = self._multi_author_citations.sub('', text)
         text = self._author_year_citations.sub('', text)
 
@@ -777,6 +892,27 @@ class PDFSalientExtractor:
 
         # Remove figure/table references
         if not self.keep_figure_refs:
+            # Parenthesized figure refs first: (Figure 2E, H), (Figures S2 and S3)
+            text = re.sub(
+                r'\((?:Figures?|Figs?\.?)\s*[S]?\d+[A-Za-z]?'
+                r'(?:\s*[-–,]\s*(?:[A-Za-z]|\d+[A-Za-z]?))*'
+                r'(?:\s+(?:and|&|;|,)\s*(?:Figures?|Figs?\.?|[S]?\d+)\s*[A-Za-z]?'
+                r'(?:\s*[-–,]\s*(?:[A-Za-z]|\d+[A-Za-z]?))*)*\)',
+                '', text, flags=re.IGNORECASE)
+            # Parenthesized table/data refs
+            text = re.sub(
+                r'\((?:Tables?|Data)\s*[S]?\d+[A-Za-z]?'
+                r'(?:\s*[-–,]\s*[S]?\d+[A-Za-z]?)*'
+                r'(?:[;,]\s*(?:(?:Tables?|Data|Figures?|Figs?\.?)\s*[S]?\d+[A-Za-z]?'
+                r'(?:\s*[-–,]\s*[S]?\d+[A-Za-z]?)*))*\)',
+                '', text, flags=re.IGNORECASE)
+            # Parenthesized supplementary refs
+            text = re.sub(
+                r'\((?:Supplementary|Supplemental)\s+'
+                r'(?:Figures?|Fig\.?|Tables?|Text|Data|Materials?|Information|Files?)'
+                r'[^)]*\)',
+                '', text, flags=re.IGNORECASE)
+            # Inline figure/table/supplementary refs
             text = self._figure_refs.sub('', text)
             text = self._table_refs.sub('', text)
             text = self._supplementary_refs.sub('', text)
@@ -818,8 +954,12 @@ class PDFSalientExtractor:
         text = re.sub(r'\(\s*[;,]\s*\)', '', text)
         text = re.sub(r'\(\s*[;,]', '(', text)
         text = re.sub(r'[;,]\s*\)', ')', text)
+        # Empty parens that might remain after removing content
+        text = re.sub(r'\(\s*\)', '', text)
+        # "see " left behind after removing "(see Figure 1)" etc.
+        text = re.sub(r'\bsee\s*[,;.]', '.', text)
 
-        # Short lines (artifacts from PDF extraction)
+        # Short lines and artifact lines (from PDF extraction)
         lines = text.split('\n')
         cleaned = []
         for line in lines:
@@ -827,6 +967,9 @@ class PDFSalientExtractor:
             if len(stripped) < 3:
                 continue
             if stripped.isdigit():
+                continue
+            # Single uppercase letters (orphaned panel labels)
+            if re.match(r'^[A-H]$', stripped):
                 continue
             cleaned.append(stripped)
         text = '\n'.join(cleaned)
