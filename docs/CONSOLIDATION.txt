@@ -59,16 +59,16 @@
          |    2. If non-native: pandoc -> .md in /tmp scratch  |
          |    3. If URL: curl + Content-Type + pandoc          |
          |    4. Pre-flight checks (word count, CUDA, disk)    |
-         |    5. Call manuscript_to_tts.py                     |
+         |    5. Call media_to_tts.py                     |
          |    6. Post-flight verify (ffprobe + hallu report)   |
          |    7. Emit 6-line DONE summary                      |
          +-----------------------+-----------------------------+
                                  |
                                  v
          +-----------------------------------------------------+
-         |  manuscript_to_tts.py  (gpu-tts-toolkit pipeline)   |
+         |  media_to_tts.py  (gpu-tts-toolkit pipeline)   |
          |    LaTeXTTSCleaner                                  |
-         |    ManuscriptTTSCleaner   (PDF)                     |
+         |    PDFTTSCleaner   (PDF)                     |
          |    PlainTextTTSCleaner                              |
          |    MarkdownTTSCleaner                               |
          |    TTSHallucinationScreener                         |
@@ -94,14 +94,21 @@
   3.1  The pipeline code (Python)
   -------------------------------
     Local run location    : /media/drn2/External/working-tts-gpu/
-                            manuscript_to_tts_20260408_104500.py
+                            media_to_tts.py
+                            (legacy dated copy still present as
+                             manuscript_to_tts_20260408_104500.py)
     Canonical (in repo)   : ~/Documents/working-tts-gpu/gpu-tts-toolkit/
-                            manuscript_to_tts.py
+                            media_to_tts.py
     GitHub                : github.com/olympus-terminal/gpu-tts-toolkit
-    Key commit            : f07983d
+    Historical commit     : f07983d
                             "Add manuscript_to_tts: unified multi-format
                              TTS pipeline with hallucination screening"
-                            (1,814 insertions)
+                            (1,814 insertions — initial upload under old
+                             name manuscript_to_tts.py)
+    Rename commit         : (added in this revision)
+                            "Rename manuscript_to_tts.py -> media_to_tts.py
+                             and promote to flagship tool"
+                            Classes: ManuscriptTTSCleaner -> PDFTTSCleaner
 
   3.2  The slash command (Markdown prompt)
   ----------------------------------------
@@ -127,7 +134,7 @@
     Script                : ~/Documents/working-tts-gpu/gpu-tts-toolkit/
                             deep_voice_tts.py
     GitHub                : github.com/olympus-terminal/gpu-tts-toolkit
-    Interface             : Called by manuscript_to_tts.py as a library
+    Interface             : Called by media_to_tts.py as a library
                             (DeepVoiceTTS.process_text_file)
 
 --------------------------------------------------------------------------------
@@ -145,7 +152,7 @@
       - Resolves \input{} recursively
       - Discards comments, \label, \ref bodies, \footnote, etc.
 
-    ManuscriptTTSCleaner
+    PDFTTSCleaner
       - Runs pdftotext -layout
       - Strips running headers, footers, page numbers
       - Collapses broken word-wraps at line boundaries
@@ -198,7 +205,7 @@
   6. CLI SURFACES
 --------------------------------------------------------------------------------
 
-  6.1  manuscript_to_tts.py (real argparse flags)
+  6.1  media_to_tts.py (real argparse flags)
   -----------------------------------------------
     input                     Single file (.tex/.pdf only); omit for --multi
     -o, --output PATH         Explicit output .txt path
@@ -234,7 +241,7 @@
   Run 1: Full TARA-Oceans manuscript (single .tex)
   ------------------------------------------------
     Input     : /media/drn2/External/TARA-Oceans/MANUSCRIPT/main.tex
-    Command   : manuscript_to_tts.py main.tex --voice p246 --format mp3 --screen
+    Command   : media_to_tts.py main.tex --voice p246 --format mp3 --screen
     Output    : main_tts_<stamp>_deep_voice_<stamp>/main_tts_*_complete.mp3
     Result    : clean synthesis, all intermediates cleaned up
 
@@ -244,7 +251,7 @@
                 reviews_07APR2026_responses.md
                 reviews_08APR2026.txt
                 reviews_08APR2026_responses.md
-    Command   : manuscript_to_tts.py --multi ... --headers ... --screen
+    Command   : media_to_tts.py --multi ... --headers ... --screen
     Output    : combined_reviews_tts_<stamp>_deep_voice_<stamp>/
                 combined_reviews_tts_<stamp>_complete.mp3
     Metadata  : 139 chunks, 50.2 MB MP3, 43.9 min
@@ -313,14 +320,14 @@
     cd ~/Documents/working-tts-gpu/gpu-tts-toolkit
     git pull
 
-    If you edit manuscript_to_tts.py locally during a session (as was done
+    If you edit media_to_tts.py locally during a session (as was done
     for this consolidation), remember to also copy it into the repo checkout
     and commit, so the change is captured:
-        cp /media/drn2/External/working-tts-gpu/manuscript_to_tts_*.py \
-           ~/Documents/working-tts-gpu/gpu-tts-toolkit/manuscript_to_tts.py
+        cp /media/drn2/External/working-tts-gpu/media_to_tts.py \
+           ~/Documents/working-tts-gpu/gpu-tts-toolkit/media_to_tts.py
         cd ~/Documents/working-tts-gpu/gpu-tts-toolkit
-        git add manuscript_to_tts.py
-        git commit -m "Update manuscript_to_tts"
+        git add media_to_tts.py
+        git commit -m "Update media_to_tts"
         git push
 
   9.4  Adding a new slash command
@@ -378,7 +385,7 @@
     the repo would either clobber the helper or force it into the repo.
     File-level links preserve the mix.
 
-  Why a copy of manuscript_to_tts.py in both /media/drn2/External and
+  Why a copy of media_to_tts.py in both /media/drn2/External and
   ~/Documents/working-tts-gpu/gpu-tts-toolkit?
     The External drive is the runtime location where the conda env, cached
     TTS model, and input data all live. The repo checkout under

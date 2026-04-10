@@ -14,6 +14,56 @@ Text-to-speech tools using GPU acceleration. Useful for converting papers and do
 
 Text-to-speech scripts optimized for GPU use. Designed for processing scientific papers, documentation, and other text on local hardware.
 
+## Main tool: `media_to_tts.py`
+
+`media_to_tts.py` is the flagship pipeline of this toolkit. It accepts **any text-bearing file** (PDF, LaTeX, Markdown, plain text, or a mixed bundle), extracts the TTS-suitable prose, synthesizes audio, and runs automatic QC / hallucination screening in a single command.
+
+```
+  INPUT                EXTRACT                 SYNTH              QC
+  .pdf     ─┐       ┌─ PDFTTSCleaner        ┐
+  .tex     ─┤       ├─ LaTeXTTSCleaner      ├─► deep_voice_tts ─► hallucination_report.json
+  .md      ─┼──►    ├─ MarkdownTTSCleaner   │      (VCTK VITS)       + _complete.mp3
+  .txt     ─┤       ├─ PlainTextTTSCleaner  │
+  --multi  ─┘       └─ clean_multi_files()  ┘
+```
+
+### Quick usage
+
+```bash
+# Single file — extraction + synthesis + screening
+python media_to_tts.py paper.pdf --voice p246 --screen
+python media_to_tts.py main.tex  --voice p246 --screen
+
+# Multi-file bundle with spoken section headers
+python media_to_tts.py --multi reviews.txt responses.md \
+    --headers "Peer reviews." "Author responses." \
+    --voice p246 --screen
+
+# Extract only (no audio)
+python media_to_tts.py paper.pdf -o paper_clean.txt
+
+# Re-screen an existing TTS output directory
+python media_to_tts.py --screen-only path/to/<basename>_deep_voice_<stamp>/
+```
+
+### Flags
+
+| Flag | Meaning |
+|------|---------|
+| `input` (positional) | Single-file input (`.pdf` or `.tex`); omit if using `--multi` |
+| `-o / --output PATH` | Output `.txt` path (default: auto-timestamped next to input) |
+| `--voice ID` | Also synthesize audio with this voice (e.g. `p246`) |
+| `--format {mp3,wav}` | Audio format (default: `mp3`) |
+| `--screen` | Pre- and post-synthesis hallucination screening |
+| `--screen-only DIR` | Analyze an existing TTS output dir (no extraction) |
+| `--keep-intermediates` | Keep `chunks/` and temp `.txt` after synthesis |
+| `--multi FILE [FILE ...]` | Multi-file mode; accepts `.txt .md .tex .pdf` in order |
+| `--headers H1 [H2 ...]` | Spoken headers, one per `--multi` file |
+
+The 10-category hallucination screener (long-number runs, word repeats, bare years, URLs, emails, hex, all-caps runs, punctuation runs, non-word runs, stray equation remnants) writes a structured `hallucination_report.json` alongside the audio output.
+
+See [`docs/CONSOLIDATION.txt`](docs/CONSOLIDATION.txt) for the full architecture, cleaner taxonomy, validation records, and bootstrap procedures.
+
 ## Qwen3-TTS (NEW)
 
 The latest addition: **Qwen3-TTS** - Alibaba's state-of-the-art TTS model with voice cloning and custom voice design.
@@ -89,10 +139,14 @@ python deep_voice_tts_v3.py input.txt --voice dylan --instruct "Speak slowly wit
 
 ```
 gpu-tts-toolkit/
-├── deep_voice_tts.py           # TTS engine (text → audio)
-├── deep_voice_tts_v2.py        # V2: PDF/LaTeX/TXT → audio in one step
-├── extract_salient_text.py     # Scientific manuscript text extractor
+├── media_to_tts.py             # MAIN: any text file → TTS-ready text + audio + QC
+├── deep_voice_tts.py           # TTS engine (text → audio), called as a library
+├── deep_voice_tts_v2.py        # Older: PDF/LaTeX/TXT → audio in one step
+├── deep_voice_tts_v3.py        # Qwen3-TTS variant (voice cloning, design)
+├── extract_salient_text.py     # Scientific paper text extractor
 ├── improved_tts_pipeline.py    # Enhanced pipeline
+├── docs/
+│   └── CONSOLIDATION.txt       # Full architecture + process documentation
 ├── core-engines/
 │   └── synthesis/              # TTS synthesis scripts
 ├── deployment/
