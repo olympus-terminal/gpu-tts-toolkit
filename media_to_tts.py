@@ -1,28 +1,39 @@
 #!/usr/bin/env python3
 """
-Manuscript-to-TTS Pipeline
-===========================
-Extracts salient prose from a compiled academic PDF or LaTeX source
-and produces a TTS-ready .txt file.  Designed around Cell Press /
-two-column layouts but works on any pdftotext-extractable manuscript
-or raw .tex source.
+Media-to-TTS Pipeline  (flagship tool of gpu-tts-toolkit)
+=========================================================
+Turn any text-bearing file — PDF, LaTeX source, Markdown, or plain text —
+into a TTS-ready .txt and, optionally, a narrated audio file with
+automatic QC / hallucination screening.
 
-Extends ArxivPaperCleaner with:
-  - pdftotext PDF extraction (layout mode)
-  - Direct LaTeX source extraction (.tex files)
-  - Superscript-style inline citation removal (bare numbers, not [N])
-  - Figure / table panel noise stripping (axis labels, coordinates, taxa lists)
-  - Greek letter and scientific symbol expansion for TTS
-  - Section-aware filtering (keeps prose, drops references, key resources, etc.)
-  - TTS hallucination screening (voice artifact detection, hostile char screening)
+Scope:
+  INPUT   : .pdf  .tex  .md  .markdown  .txt  .log
+            (mixed bundles supported via --multi)
+  EXTRACT : format-specific cleaner dispatched by file extension
+  SYNTH   : deep_voice_tts.py (Coqui VCTK VITS, GPU when available)
+  QC      : 10-category pre-synthesis pattern screen + post-synthesis
+            audio screening, with a JSON report per run
+
+Cleaners (each exposes a clean() method returning TTS-ready text):
+  - PDFTTSCleaner        PDFs via pdftotext -layout, then boilerplate strip
+  - LaTeXTTSCleaner      .tex sources (citations, math, \\input, macros)
+  - MarkdownTTSCleaner   .md / .markdown (headers, emphasis, tables)
+  - PlainTextTTSCleaner  .txt / .log (bullets, rules, review headers)
+  - clean_multi_files()  dispatcher for multi-file concatenation
+
+Additional features:
+  - Greek letter and scientific symbol expansion (_expand_for_tts)
+  - Section-aware filtering (keeps prose, drops references, key resources)
+  - TTS hallucination screening (text + audio)
   - deep_voice_tts.py integration with output analysis
+  - Automatic cleanup of intermediate chunks / temp .txt
 
 Usage:
-    python manuscript_to_tts.py manuscript.pdf [-o output.txt]
-    python manuscript_to_tts.py manuscript.tex [-o output.txt]
-    python manuscript_to_tts.py manuscript.tex --voice p246   # extract + synthesize
-    python manuscript_to_tts.py manuscript.tex --voice p246 --screen  # + hallucination screening
-    python manuscript_to_tts.py --multi file1.txt file2.md file3.txt --voice p246  # concatenate + synthesize
+    python media_to_tts.py paper.pdf [-o output.txt]
+    python media_to_tts.py main.tex [-o output.txt]
+    python media_to_tts.py main.tex --voice p246           # extract + synthesize
+    python media_to_tts.py main.tex --voice p246 --screen  # + hallucination screening
+    python media_to_tts.py --multi file1.txt file2.md file3.tex --voice p246
 """
 
 import argparse
@@ -108,8 +119,8 @@ def _is_figure_noise(s: str) -> bool:
 # ---------------------------------------------------------------------------
 # Main cleaner
 # ---------------------------------------------------------------------------
-class ManuscriptTTSCleaner:
-    """Extract and clean a manuscript PDF into TTS-ready text."""
+class PDFTTSCleaner:
+    """Extract and clean a PDF document (papers, manuscripts, reports) into TTS-ready text."""
 
     # Sections to DROP entirely (case-insensitive start-of-paragraph match)
     _DROP_SECTION_STARTS = [
@@ -980,10 +991,10 @@ class LaTeXTTSCleaner:
         raw = self._expand_latex_commands(raw)
 
         # 10. Apply the same TTS expansions as the PDF cleaner
-        raw = ManuscriptTTSCleaner._expand_for_tts(raw)
+        raw = PDFTTSCleaner._expand_for_tts(raw)
 
         # 11. Reflow into paragraphs
-        paragraphs = ManuscriptTTSCleaner._reflow(raw)
+        paragraphs = PDFTTSCleaner._reflow(raw)
 
         # 12. Screen for TTS hazards
         paragraphs = self._screen_for_tts_hazards(paragraphs)
@@ -1127,7 +1138,7 @@ class PlainTextTTSCleaner:
 
         # Apply shared TTS expansions
         text = '\n\n'.join(paragraphs)
-        text = ManuscriptTTSCleaner._expand_for_tts(text)
+        text = PDFTTSCleaner._expand_for_tts(text)
 
         # Add spoken header if provided
         if spoken_header:
@@ -1260,7 +1271,7 @@ class MarkdownTTSCleaner:
 
         # Apply shared TTS expansions
         text = '\n\n'.join(paragraphs)
-        text = ManuscriptTTSCleaner._expand_for_tts(text)
+        text = PDFTTSCleaner._expand_for_tts(text)
 
         # Add spoken header if provided
         if spoken_header:
@@ -1309,7 +1320,7 @@ def clean_multi_files(file_paths: list[str], spoken_headers: list[str] | None = 
             if header:
                 text = header + '\n\n' + text
         elif ext == '.pdf':
-            cleaner = ManuscriptTTSCleaner()
+            cleaner = PDFTTSCleaner()
             text = cleaner.clean(fpath)
             if header:
                 text = header + '\n\n' + text
@@ -1526,9 +1537,14 @@ class TTSHallucinationScreener:
 # ---------------------------------------------------------------------------
 def main():
     parser = argparse.ArgumentParser(
-        description='Extract TTS-ready text from a manuscript PDF, LaTeX source, or multiple text/markdown files',
+        prog='media_to_tts',
+        description=(
+            'Media-to-TTS: extract TTS-ready text from any text-bearing file '
+            '(PDF, LaTeX, Markdown, plain text) or multi-file bundle, then '
+            'optionally synthesize audio with hallucination screening (QC).'
+        ),
     )
-    parser.add_argument('input', nargs='?', help='Path to manuscript (.pdf or .tex). Omit if using --multi.')
+    parser.add_argument('input', nargs='?', help='Path to input file (.pdf or .tex). Omit if using --multi.')
     parser.add_argument('-o', '--output', help='Output .txt path (default: auto-timestamped)')
     parser.add_argument(
         '--voice', default=None,
@@ -1690,7 +1706,7 @@ def main():
         warnings = cleaner.get_warnings()
     elif ext == '.pdf':
         print(f"PDF detected: {input_path}")
-        cleaner = ManuscriptTTSCleaner()
+        cleaner = PDFTTSCleaner()
         text = cleaner.clean(input_path)
     else:
         print(f"Warning: unknown extension '{ext}', attempting as LaTeX...",
