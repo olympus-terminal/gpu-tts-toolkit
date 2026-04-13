@@ -125,16 +125,17 @@ class DeepVoiceTTS:
                 "speaker": selected_voice,
                 "description": f"Random favorite voice: {selected_voice}",
                 "chunk_size": 400,
-                "speed": 0.95
+                "speed": 0.90 if selected_voice == "p246" else 0.95
             }
         elif voice_profile.startswith("p") and voice_profile[1:].isdigit():
             # Direct speaker ID (e.g., p230, p234)
+            speed = 0.90 if voice_profile == "p246" else 0.95
             self.profile = {
                 "model": "tts_models/en/vctk/vits",
                 "speaker": voice_profile,
                 "description": f"VCTK Speaker {voice_profile}",
                 "chunk_size": 400,
-                "speed": 0.95
+                "speed": speed
             }
         elif voice_profile in self.voice_profiles:
             # Use predefined profile
@@ -280,7 +281,13 @@ class DeepVoiceTTS:
         # Clean whitespace
         text = re.sub(r'\s+', ' ', text)
         text = re.sub(r'\n{3,}', '\n\n', text)
-        
+
+        # Add subtle pauses for p246 (better word separation)
+        if hasattr(self, 'profile') and self.profile.get('speaker') == 'p246':
+            text = re.sub(r'(\.) ([A-Z])', r'\1, \2', text)
+            text = re.sub(r'(and) ([a-z])', r'\1, \2', text)
+            text = re.sub(r'(but) ([a-z])', r'\1, \2', text)
+
         return text.strip()
     
     def apply_voice_effects(self, audio_path):
