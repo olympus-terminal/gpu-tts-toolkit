@@ -301,6 +301,14 @@ class PDFTTSCleaner:
     def _expand_for_tts(text: str) -> str:
         """Expand symbols, abbreviations, and notation for natural TTS."""
 
+        # --- Pandoc gfm backslash-escapes ---
+        # pandoc emits \< \> \[ \] \* etc. to keep markdown from reparsing them.
+        # Unescape FIRST so downstream rules (p-less-than, emphasis strippers,
+        # bracket strippers) can see and handle the real characters.
+        # Also collapse doubled backslashes pandoc sometimes emits in author lists.
+        text = text.replace('\\\\', '')
+        text = re.sub(r'\\([\[\]<>*_~`|#!()+\-.,;:\'" ])', r'\1', text)
+
         # --- Latin abbreviations ---
         text = re.sub(r'\be\.g\.,\s*', 'for example, ', text)
         text = re.sub(r'\be\.g\.\s', 'for example ', text)
@@ -393,6 +401,18 @@ class PDFTTSCleaner:
         # "Pfam-A 5 char" — after hyphen-letter
         text = re.sub(r'(?<=[a-zA-Z]) (\d{1,2}) (?=[a-z])', ' ', text)
 
+        # --- Markdown links / autolinks: rewrite before bare-URL stripping ---
+        # [text](url) → text
+        text = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'\1', text)
+        # Image ![alt](url) → alt
+        text = re.sub(r'!\[([^\]]*)\]\([^)]*\)', r'\1', text)
+        # <http://...> or <email@host> autolinks → drop
+        text = re.sub(r'<(https?://[^>]+|[^@\s<>]+@[^@\s<>]+)>', '', text)
+        # Reference-style [text][id] → text
+        text = re.sub(r'\[([^\]]+)\]\[[^\]]*\]', r'\1', text)
+        # Footnote markers [^1]
+        text = re.sub(r'\[\^[^\]]+\]', '', text)
+
         # --- Remove URLs, DOIs, RRIDs ---
         text = re.sub(r'https?://\S+', '', text)
         text = re.sub(r'\bdoi:\s*\S+', '', text)
@@ -413,8 +433,73 @@ class PDFTTSCleaner:
         # Expand LA4SR placeholder to final spoken form (after citation removal)
         text = text.replace('LA4SR_PLACEHOLDER', 'L.A. 4 S.R.')
 
+        # --- Strip typographic / markup symbols the TTS would read aloud ---
+        # These run LAST so earlier rules that intentionally match on `*`,
+        # `=`, etc. (e.g. the correspondence-line stripper above) still work.
+
+        # Fenced code blocks: drop entirely (rare in markdown-from-docx, but
+        # they emit raw code which is unlistenable).
+        text = re.sub(r'```.*?```', ' ', text, flags=re.DOTALL)
+
+        # Inline code ticks
+        text = text.replace('`', '')
+
+        # (Markdown links / autolinks / footnote markers were already rewritten
+        # above, before the bare-URL strip.)
+
+        # HTML tags (pandoc-from-docx emits <sup>, <sub>, <br>, <span>, etc.)
+        text = re.sub(r'</?[a-zA-Z][^>]*>', '', text)
+        # Common HTML entities
+        text = text.replace('&nbsp;', ' ')
+        text = text.replace('&amp;', 'and')
+        text = text.replace('&lt;', '')
+        text = text.replace('&gt;', '')
+
+        # Emphasis markup (after any earlier rules that match paired `**`).
+        # Triple → double → single: order matters so we don't leave stragglers.
+        text = re.sub(r'\*{3}([^\*]+)\*{3}', r'\1', text)
+        text = re.sub(r'\*{2}([^\*]+)\*{2}', r'\1', text)
+        text = re.sub(r'\*([^\*\s][^\*]*?)\*', r'\1', text)   # paired single *
+        text = re.sub(r'(?<![a-zA-Z0-9])_([^_\s][^_]*?)_(?![a-zA-Z0-9])', r'\1', text)
+        text = re.sub(r'~~([^~]+)~~', r'\1', text)            # strikethrough
+
+        # Highlight: ==text== → text
+        text = re.sub(r'==([^=]+)==', r'\1', text)
+
+        # Setext heading underlines (=== or ---) left on their own line
+        text = re.sub(r'^\s*={3,}\s*$', '', text, flags=re.MULTILINE)
+        text = re.sub(r'^\s*-{3,}\s*$', '', text, flags=re.MULTILINE)
+
+        # Leading list markers at start of a line: "* item", "+ item", "- item"
+        text = re.sub(r'(?m)^\s*[\*+\-]\s+', '', text)
+        # Ordered-list markers "1. " at start of a line
+        text = re.sub(r'(?m)^\s*\d+\.\s+', '', text)
+
+        # Markdown pipe-table leftovers (if any made it past the line filter)
+        text = re.sub(r'(?m)^\s*\|.*\|\s*$', '', text)
+
+        # Bracketed citations like [27], [3,5], [1-4] → drop entirely
+        text = re.sub(r'\[\s*\d+(?:\s*[-–,]\s*\d+)*\s*\]', '', text)
+        # Other stray brackets that aren't part of anything meaningful
+        text = re.sub(r'[\[\]]+', '', text)
+
+        # Any stray unpaired `*`, `_`, `~`, backtick, or pipe characters
+        # (these would be voiced as "asterisk", "underscore", etc.)
+        text = re.sub(r'[\*~`|]+', '', text)
+        # Stray `=` when not part of a math/equation construct we already handled
+        # (equals inside "R-squared = 0.4" was already converted by earlier rules
+        # that left literal "=", so keep those; only strip runs of 2+ that would
+        # otherwise be voiced.)
+        text = re.sub(r'={2,}', '', text)
+
+        # Underscore in normal prose (e.g. variable names, remaining italics
+        # delimiters we didn't catch above). Keep single underscores that
+        # appear within tokens (e.g. identifiers the user may want spelled).
+        text = re.sub(r'(?<!\w)_(?!\w)', '', text)
+
         # Final whitespace cleanup
-        text = re.sub(r'  +', ' ', text)
+        text = re.sub(r'[ \t]+', ' ', text)
+        text = re.sub(r' *\n *', '\n', text)
         return text
 
     # ------------------------------------------------------------------
