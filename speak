@@ -1,0 +1,512 @@
+#!/usr/bin/env bash
+# speak — standalone port of the Claude /speak pipeline.
+# Extracts salient text from media (files, URLs, or mixed), runs it through
+# gpu-tts-toolkit's media_to_tts.py with hallucination screening, and emits
+# a single narrated MP3.
+#
+# Usage:
+#   speak <file|url> [file2 ...] [--voice p246] [--format mp3|wav]
+#         [--headers "H1" "H2" ...] [--keep-intermediates]
+#
+# Defaults: voice=p246, format=mp3, screening on, intermediates cleaned.
+
+set -euo pipefail
+
+# -----------------------------------------------------------------------------
+# 1. Locate the pipeline script (media_to_tts.py).
+#
+# Search order:
+#   a. $SPEAK_PIPELINE env override
+#   b. Sibling in the same directory as this script (the normal clone layout)
+#   c. Sibling resolving the symlink (e.g. when `speak` is symlinked into PATH)
+#   d. A few hardcoded local fallbacks for the author's dev machine
+# -----------------------------------------------------------------------------
+SELF_DIR_RAW="$(cd "$(dirname "$0")" && pwd)"
+SELF_DIR_REAL="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+
+SCRIPT=""
+for CAND in \
+    "${SPEAK_PIPELINE:-}" \
+    "${SELF_DIR_RAW}/media_to_tts.py" \
+    "${SELF_DIR_REAL}/media_to_tts.py" \
+    /media/drn2/External/working-tts-gpu/media_to_tts.py \
+    /home/drn2/Documents/working-tts-gpu/gpu-tts-toolkit/media_to_tts.py \
+    /media/drn2/External/working-tts-gpu/manuscript_to_tts_20260408_104500.py \
+    /home/drn2/Documents/working-tts-gpu/gpu-tts-toolkit/manuscript_to_tts.py
+do
+    if [[ -n "$CAND" && -f "$CAND" ]]; then
+        SCRIPT="$CAND"
+        break
+    fi
+done
+if [[ -z "$SCRIPT" ]]; then
+    echo "ERROR: media_to_tts.py not found. Clone https://github.com/olympus-terminal/gpu-tts-toolkit and run speak from there, or set \$SPEAK_PIPELINE." >&2
+    exit 1
+fi
+
+# -----------------------------------------------------------------------------
+# 2. Activate the TTS conda env (deep_voice_tts.py + torch + Coqui live there).
+#
+# Configurable via $SPEAK_CONDA_ENV (default: tts-app). Skip cleanly if either
+# the env or miniconda isn't present — the user may already be in a suitable
+# env, or may have torch installed globally.
+# -----------------------------------------------------------------------------
+SPEAK_CONDA_ENV="${SPEAK_CONDA_ENV:-tts-app}"
+
+if [[ -z "${CONDA_DEFAULT_ENV:-}" || "${CONDA_DEFAULT_ENV}" != "$SPEAK_CONDA_ENV" ]]; then
+    CONDA_SH=""
+    for C in \
+        "$HOME/miniconda3/etc/profile.d/conda.sh" \
+        "$HOME/anaconda3/etc/profile.d/conda.sh" \
+        "/opt/conda/etc/profile.d/conda.sh"
+    do
+        if [[ -f "$C" ]]; then
+            CONDA_SH="$C"
+            break
+        fi
+    done
+
+    if [[ -n "$CONDA_SH" ]]; then
+        # conda's activate/deactivate scripts touch unset vars; relax nounset briefly.
+        set +u
+        # shellcheck disable=SC1091
+        source "$CONDA_SH"
+        if conda env list 2>/dev/null | awk '{print $1}' | grep -qx "$SPEAK_CONDA_ENV"; then
+            conda activate "$SPEAK_CONDA_ENV"
+        else
+            echo "NOTE: conda env '$SPEAK_CONDA_ENV' not found; using current Python environment." >&2
+        fi
+        set -u
+    else
+        echo "NOTE: miniconda/anaconda not detected; using current Python environment." >&2
+    fi
+fi
+
+# -----------------------------------------------------------------------------
+# 3. Parse arguments — tokens starting with -- are flags, rest are inputs.
+#    Recognized flags: --voice, --format, --headers (var-length), --keep-intermediates
+# -----------------------------------------------------------------------------
+VOICE="p246"
+FMT="mp3"
+KEEP_INT=0
+INPUTS=()
+HEADERS=()
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --voice)
+            VOICE="${2:?--voice requires an argument}"
+            shift 2
+            ;;
+        --format)
+            FMT="${2:?--format requires mp3 or wav}"
+            shift 2
+            ;;
+        --keep-intermediates)
+            KEEP_INT=1
+            shift
+            ;;
+        --headers)
+            shift
+            while [[ $# -gt 0 && "$1" != --* ]]; do
+                HEADERS+=("$1")
+                shift
+            done
+            ;;
+        --help|-h)
+            sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
+            exit 0
+            ;;
+        --*)
+            echo "ERROR: unknown flag: $1" >&2
+            exit 2
+            ;;
+        *)
+            INPUTS+=("$1")
+            shift
+            ;;
+    esac
+done
+
+if [[ ${#INPUTS[@]} -eq 0 ]]; then
+    echo "ERROR: no input file/URL given. Usage: speak <file|url> [...]" >&2
+    exit 2
+fi
+
+# -----------------------------------------------------------------------------
+# 4. Pre-flight: required binaries, CUDA, disk
+# -----------------------------------------------------------------------------
+for bin in python3 pandoc pdftotext ffmpeg curl; do
+    if ! command -v "$bin" >/dev/null 2>&1; then
+        echo "ERROR: required binary missing: $bin" >&2
+        case "$bin" in
+            pandoc|pdftotext|ffmpeg) echo "  Hint: sudo apt install $bin" >&2 ;;
+        esac
+        exit 3
+    fi
+done
+
+if python3 -c "import torch; raise SystemExit(0 if torch.cuda.is_available() else 1)" 2>/dev/null; then
+    :
+else
+    echo "WARNING: CUDA not available — synthesis will run on CPU (~10× slower)." >&2
+fi
+
+AVAIL_MB=$(df -BM /tmp --output=avail | tail -1 | tr -dc '0-9')
+if [[ "${AVAIL_MB:-0}" -lt 500 ]]; then
+    echo "ERROR: less than 500 MB free in /tmp (have ${AVAIL_MB}M)." >&2
+    exit 4
+fi
+
+# -----------------------------------------------------------------------------
+# 5. Scratch dir for pre-conversions / URL fetches
+# -----------------------------------------------------------------------------
+STAMP=$(date +%s)
+SCRATCH="/tmp/speak_${STAMP}"
+mkdir -p "$SCRATCH"
+# File recording paths we staged next to the user's input (not in $SCRATCH).
+# Uses a file rather than a bash array because pandoc_to_md is invoked via
+# command substitution (a subshell) and array mutations wouldn't propagate.
+STAGED_LIST="$SCRATCH/.staged_files"
+: > "$STAGED_LIST"
+cleanup_scratch() {
+    if [[ -f "$STAGED_LIST" ]]; then
+        while IFS= read -r f; do
+            [[ -n "$f" && -f "$f" ]] && rm -f "$f"
+        done < "$STAGED_LIST"
+    fi
+    if [[ -d "$SCRATCH" ]]; then
+        rm -rf "$SCRATCH"
+    fi
+}
+trap cleanup_scratch EXIT
+
+# -----------------------------------------------------------------------------
+# 6. Helpers
+# -----------------------------------------------------------------------------
+# lowercase extension of a filename (no leading dot); empty if none
+extension_of() {
+    local f="$1"
+    local base="${f##*/}"
+    if [[ "$base" == *.* ]]; then
+        printf '%s' "${base##*.}" | tr '[:upper:]' '[:lower:]'
+    fi
+}
+
+# Return a safe basename (no ext) for naming scratch files
+stem_of() {
+    local f="$1"
+    local base="${f##*/}"
+    printf '%s' "${base%.*}"
+}
+
+# pandoc-convert $1 (source file) of format $2. The .md is written next to
+# the source file (so pipeline output lands in the user's working dir, not
+# scratch), and the path is recorded in $STAGED_FILES for post-run cleanup.
+# If the source itself is already inside $SCRATCH (URL fetch), the .md stays
+# in $SCRATCH.
+pandoc_to_md() {
+    local src="$1"
+    local fmt="$2"
+    local stem
+    stem=$(stem_of "$src")
+    local parent
+    parent=$(dirname "$(readlink -f "$src")")
+    local out="${parent}/${stem}.speak.md"
+    if ! pandoc -f "$fmt" -t gfm -o "$out" "$src" 2>"$SCRATCH/pandoc.err"; then
+        echo "ERROR: pandoc failed converting $src (format=$fmt):" >&2
+        cat "$SCRATCH/pandoc.err" >&2
+        exit 5
+    fi
+    # Only stage for cleanup if we put it in the user's dir (not scratch).
+    if [[ "$parent" != "$SCRATCH"* ]]; then
+        printf '%s\n' "$out" >> "$STAGED_LIST"
+    fi
+    printf '%s' "$out"
+}
+
+# Expand a directory into a natural-sorted list of .tex/.pdf/.md/.txt files
+expand_directory() {
+    local dir="$1"
+    find "$dir" -maxdepth 1 -type f \
+        \( -iname '*.tex' -o -iname '*.pdf' -o -iname '*.md' -o -iname '*.txt' \) \
+        | LC_ALL=C sort -V
+}
+
+# Fetch a URL into the scratch dir, return path to the saved file with
+# a sensible extension based on Content-Type.
+fetch_url() {
+    local url="$1"
+    local dest="$SCRATCH/url_$(date +%s%N).bin"
+    if ! curl -L -sSL -A "Mozilla/5.0" -o "$dest" "$url"; then
+        echo "ERROR: curl failed for $url" >&2
+        exit 6
+    fi
+    local ct
+    ct=$(file --mime-type -b "$dest")
+    case "$ct" in
+        application/pdf)       mv "$dest" "${dest}.pdf"; printf '%s' "${dest}.pdf" ;;
+        application/epub+zip)  mv "$dest" "${dest}.epub"; printf '%s' "${dest}.epub" ;;
+        text/html)             mv "$dest" "${dest}.html"; printf '%s' "${dest}.html" ;;
+        text/plain)            mv "$dest" "${dest}.txt"; printf '%s' "${dest}.txt" ;;
+        application/vnd.openxmlformats-officedocument.wordprocessingml.document)
+                               mv "$dest" "${dest}.docx"; printf '%s' "${dest}.docx" ;;
+        *)                     printf '%s' "$dest" ;;
+    esac
+}
+
+# Word count for extraction sanity check
+word_count() {
+    local f="$1"
+    local ext
+    ext=$(extension_of "$f")
+    case "$ext" in
+        pdf) pdftotext "$f" - 2>/dev/null | wc -w ;;
+        *)   wc -w < "$f" ;;
+    esac
+}
+
+# Humanize a filename stem into a spoken header phrase
+humanize_header() {
+    local stem="$1"
+    local lower
+    lower=$(printf '%s' "$stem" | tr '[:upper:]' '[:lower:]')
+    case "$lower" in
+        *reviews*)                     printf 'Reviews.' ;;
+        *responses*|*response*)        printf 'Author responses.' ;;
+        *supplement*|*suppl*)          printf 'Supplemental material.' ;;
+        main|*main*)                   printf 'Main text.' ;;
+        *)
+            local spaced
+            spaced=$(printf '%s' "$stem" | tr '_-' '  ')
+            # Title-case each word
+            printf '%s.' "$(printf '%s' "$spaced" | awk '{for(i=1;i<=NF;i++) $i=toupper(substr($i,1,1)) tolower(substr($i,2))}1')"
+            ;;
+    esac
+}
+
+# -----------------------------------------------------------------------------
+# 7. Resolve each input → a pipeline-ready file (pdf, tex, md, or txt).
+# -----------------------------------------------------------------------------
+RESOLVED=()
+for IN in "${INPUTS[@]}"; do
+    # URL?
+    if [[ "$IN" =~ ^https?:// ]]; then
+        FETCHED=$(fetch_url "$IN")
+        ext=$(extension_of "$FETCHED")
+        case "$ext" in
+            pdf|txt)
+                RESOLVED+=("$FETCHED")
+                ;;
+            html)
+                RESOLVED+=("$(pandoc_to_md "$FETCHED" html)")
+                ;;
+            epub)
+                RESOLVED+=("$(pandoc_to_md "$FETCHED" epub)")
+                ;;
+            docx)
+                RESOLVED+=("$(pandoc_to_md "$FETCHED" docx)")
+                ;;
+            *)
+                # Last-ditch: treat as text if it looks textual
+                if file -b "$FETCHED" | grep -qi text; then
+                    mv "$FETCHED" "${FETCHED}.txt"
+                    RESOLVED+=("${FETCHED}.txt")
+                else
+                    echo "ERROR: could not determine how to handle URL content: $IN ($(file -b "$FETCHED"))" >&2
+                    exit 7
+                fi
+                ;;
+        esac
+        continue
+    fi
+
+    # Local path
+    if [[ ! -e "$IN" ]]; then
+        echo "ERROR: input not found: $IN" >&2
+        exit 8
+    fi
+
+    if [[ -d "$IN" ]]; then
+        while IFS= read -r sub; do
+            RESOLVED+=("$sub")
+        done < <(expand_directory "$IN")
+        continue
+    fi
+
+    ext=$(extension_of "$IN")
+    case "$ext" in
+        tex|pdf|md|markdown|txt|log)
+            RESOLVED+=("$IN")
+            ;;
+        docx)
+            RESOLVED+=("$(pandoc_to_md "$IN" docx)")
+            ;;
+        odt)
+            RESOLVED+=("$(pandoc_to_md "$IN" odt)")
+            ;;
+        rtf)
+            RESOLVED+=("$(pandoc_to_md "$IN" rtf)")
+            ;;
+        epub)
+            RESOLVED+=("$(pandoc_to_md "$IN" epub)")
+            ;;
+        rst)
+            RESOLVED+=("$(pandoc_to_md "$IN" rst)")
+            ;;
+        html|htm)
+            RESOLVED+=("$(pandoc_to_md "$IN" html)")
+            ;;
+        "")
+            echo "ERROR: $IN has no extension and type can't be inferred." >&2
+            exit 9
+            ;;
+        *)
+            # Try pandoc with ext as the format; abort on failure.
+            if RES=$(pandoc_to_md "$IN" "$ext" 2>&1); then
+                RESOLVED+=("$RES")
+            else
+                echo "ERROR: unsupported format .$ext for $IN" >&2
+                echo "$RES" >&2
+                exit 10
+            fi
+            ;;
+    esac
+done
+
+if [[ ${#RESOLVED[@]} -eq 0 ]]; then
+    echo "ERROR: no resolvable inputs after dispatch." >&2
+    exit 11
+fi
+
+# Word-count sanity check on each resolved file
+for R in "${RESOLVED[@]}"; do
+    WC=$(word_count "$R" 2>/dev/null || echo 0)
+    if [[ "${WC:-0}" -lt 100 ]]; then
+        echo "WARNING: $R has only ${WC:-0} words — probable extraction failure." >&2
+    fi
+done
+
+# -----------------------------------------------------------------------------
+# 8. Build pipeline invocation
+# -----------------------------------------------------------------------------
+PIPELINE_ARGS=(--voice "$VOICE" --format "$FMT" --screen)
+[[ "$KEEP_INT" -eq 1 ]] && PIPELINE_ARGS+=(--keep-intermediates)
+
+# Single-file positional mode only supports .pdf and .tex; anything else
+# (including a single .md/.txt) must go via --multi.
+if [[ ${#RESOLVED[@]} -eq 1 ]]; then
+    ONLY="${RESOLVED[0]}"
+    oext=$(extension_of "$ONLY")
+    if [[ "$oext" == "pdf" || "$oext" == "tex" ]]; then
+        echo "Running pipeline (single-file mode): $ONLY"
+        python3 "$SCRIPT" "$ONLY" "${PIPELINE_ARGS[@]}"
+    else
+        # Wrap into --multi with one entry; auto-generate header unless user gave one.
+        if [[ ${#HEADERS[@]} -eq 0 ]]; then
+            HDR=$(humanize_header "$(stem_of "$ONLY")")
+            HEADERS=("$HDR")
+        fi
+        echo "Running pipeline (multi mode, 1 file): $ONLY"
+        python3 "$SCRIPT" --multi "$ONLY" --headers "${HEADERS[@]}" "${PIPELINE_ARGS[@]}"
+    fi
+else
+    # Multi-file mode: generate headers if not supplied.
+    if [[ ${#HEADERS[@]} -eq 0 ]]; then
+        i=1
+        for R in "${RESOLVED[@]}"; do
+            BODY=$(humanize_header "$(stem_of "$R")")
+            HEADERS+=("Part ${i}. ${BODY}")
+            i=$((i + 1))
+        done
+    elif [[ ${#HEADERS[@]} -ne ${#RESOLVED[@]} ]]; then
+        echo "ERROR: --headers count (${#HEADERS[@]}) does not match input count (${#RESOLVED[@]})." >&2
+        exit 12
+    fi
+    echo "Running pipeline (multi mode, ${#RESOLVED[@]} files)"
+    python3 "$SCRIPT" --multi "${RESOLVED[@]}" --headers "${HEADERS[@]}" "${PIPELINE_ARGS[@]}"
+fi
+
+# -----------------------------------------------------------------------------
+# 9. Post-flight verification — find the newest *_deep_voice_* dir beside the
+#    first resolved input's parent, then report stats.
+# -----------------------------------------------------------------------------
+FIRST_INPUT="${RESOLVED[0]}"
+# If the first input was a scratch file, look in the original invocation's
+# parent instead; but media_to_tts.py writes next to the input it receives,
+# so whatever we passed is correct.
+OUT_PARENT="$(dirname "$(readlink -f "$FIRST_INPUT")")"
+OUT_DIR=$(find "$OUT_PARENT" -maxdepth 1 -type d -name '*_deep_voice_*' -printf '%T@ %p\n' 2>/dev/null \
+          | sort -n | tail -1 | cut -d' ' -f2-)
+
+if [[ -z "$OUT_DIR" || ! -d "$OUT_DIR" ]]; then
+    echo "ERROR: could not locate output directory after synthesis." >&2
+    exit 13
+fi
+
+MP3=$(find "$OUT_DIR" -maxdepth 1 -name '*_complete.mp3' -o -name '*_complete.wav' | head -1)
+if [[ -z "$MP3" || ! -f "$MP3" ]]; then
+    echo "ERROR: synthesized audio not found in $OUT_DIR" >&2
+    exit 14
+fi
+
+SIZE_BYTES=$(stat --format=%s "$MP3")
+if [[ "$SIZE_BYTES" -lt 102400 ]]; then
+    echo "ERROR: output audio is suspiciously small (<100 KB): $MP3" >&2
+    exit 15
+fi
+SIZE_MB=$(awk -v b="$SIZE_BYTES" 'BEGIN {printf "%.1f", b/1024/1024}')
+
+DUR_SEC=$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "$MP3" 2>/dev/null || echo 0)
+DUR_HMS=$(awk -v s="$DUR_SEC" 'BEGIN {
+    s=int(s+0.5); h=int(s/3600); m=int((s%3600)/60); sec=s%60;
+    printf "%d:%02d:%02d", h, m, sec
+}')
+
+# Chunks count: from metadata.json if present, else 0
+CHUNKS=0
+if [[ -f "$OUT_DIR/metadata.json" ]]; then
+    CHUNKS=$(python3 -c "import json,sys; d=json.load(open('$OUT_DIR/metadata.json')); print(d.get('num_chunks', d.get('chunks', 0)))" 2>/dev/null || echo 0)
+fi
+
+# Hallucination report
+PRE=0; POST=0; TOP3=""
+REPORT="$OUT_DIR/hallucination_report.json"
+if [[ -f "$REPORT" ]]; then
+    read -r PRE POST TOP3 < <(python3 - "$REPORT" <<'PY'
+import json, sys, collections
+with open(sys.argv[1]) as f:
+    r = json.load(f)
+# Accept several shapes
+text = r.get("text_triggers") or r.get("text_issues") or []
+audio = r.get("audio_issues") or r.get("audio_triggers") or []
+if isinstance(text, dict):
+    text_items = [(k, v) for k, v in text.items()]
+    pre = sum(v if isinstance(v, int) else len(v) for _, v in text_items)
+    cats = collections.Counter({k: (v if isinstance(v, int) else len(v)) for k, v in text_items})
+else:
+    pre = len(text)
+    cats = collections.Counter(t.get("category", t.get("type", "UNKNOWN")) for t in text if isinstance(t, dict))
+post = len(audio) if isinstance(audio, list) else (sum(audio.values()) if isinstance(audio, dict) else 0)
+top = ",".join(f"{c}:{n}" for c, n in cats.most_common(3))
+print(pre, post, top or "-")
+PY
+    )
+fi
+
+# Speed: deep_voice defaults to 0.90× for VCTK voices
+SPEED="0.90"
+
+echo
+echo "DONE: $MP3"
+echo "Duration: $DUR_HMS"
+echo "Size: ${SIZE_MB} MB"
+echo "Chunks: $CHUNKS"
+echo "Voice: $VOICE @ ${SPEED}x"
+echo "Flags: pre=${PRE} text triggers, post=${POST} audio issues"
+
+if [[ "${PRE:-0}" -gt 0 || "${POST:-0}" -gt 0 ]]; then
+    if [[ -n "$TOP3" && "$TOP3" != "-" ]]; then
+        echo "Top trigger categories: $TOP3"
+    fi
+fi
