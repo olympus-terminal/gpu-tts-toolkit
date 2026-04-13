@@ -132,6 +132,23 @@ if [[ ${#INPUTS[@]} -eq 0 ]]; then
     exit 2
 fi
 
+# Remember the user's first source (for naming the final MP3) and where to
+# drop it. URLs fall back to a sanitized basename derived from the URL.
+FIRST_SOURCE="${INPUTS[0]}"
+if [[ "$FIRST_SOURCE" =~ ^https?:// ]]; then
+    FINAL_STEM=$(printf '%s' "${FIRST_SOURCE##*/}" | sed 's/[?#].*//; s/\.[^.]*$//; s/[^A-Za-z0-9._-]/_/g')
+    [[ -z "$FINAL_STEM" ]] && FINAL_STEM="transcribe_$(date +%s)"
+    FINAL_DIR="$PWD"
+else
+    FINAL_STEM="$(basename "$FIRST_SOURCE")"
+    FINAL_STEM="${FINAL_STEM%.*}"
+    if [[ -d "$FIRST_SOURCE" ]]; then
+        FINAL_DIR="$(cd "$FIRST_SOURCE" && pwd)"
+    else
+        FINAL_DIR="$(cd "$(dirname "$FIRST_SOURCE")" && pwd)"
+    fi
+fi
+
 # -----------------------------------------------------------------------------
 # 4. Pre-flight: required binaries, CUDA, disk
 # -----------------------------------------------------------------------------
@@ -495,6 +512,32 @@ fi
 
 # Speed: deep_voice defaults to 0.90× for VCTK voices
 SPEED="0.90"
+
+# -----------------------------------------------------------------------------
+# 10. Finalize: move the MP3 to <source_dir>/<source_stem>.<ext> and nuke the
+#     pipeline's output directory (it also holds metadata.json and the
+#     hallucination report, both of which the user said they don't want).
+# -----------------------------------------------------------------------------
+OUT_EXT="${MP3##*.}"
+FINAL_PATH="${FINAL_DIR}/${FINAL_STEM}.${OUT_EXT}"
+if [[ "$FINAL_PATH" != "$MP3" ]]; then
+    # If a previous run left the same-named file, move it aside rather than
+    # clobber silently.
+    if [[ -e "$FINAL_PATH" ]]; then
+        BACKUP="${FINAL_DIR}/${FINAL_STEM}.prev.${OUT_EXT}"
+        mv -f "$FINAL_PATH" "$BACKUP"
+        echo "NOTE: existing $FINAL_PATH moved to $BACKUP" >&2
+    fi
+    mv -f "$MP3" "$FINAL_PATH"
+    MP3="$FINAL_PATH"
+fi
+
+# Remove the pipeline's staging directory (metadata.json, hallucination_report.json,
+# and any leftover .txt the pipeline kept). Respect --keep-intermediates as an
+# escape hatch for debugging.
+if [[ "$KEEP_INT" -ne 1 && -d "$OUT_DIR" ]]; then
+    rm -rf "$OUT_DIR"
+fi
 
 echo
 echo "DONE: $MP3"
