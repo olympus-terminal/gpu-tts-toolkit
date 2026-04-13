@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
-# speak — standalone port of the Claude /speak pipeline.
+# transcribe — do-all TTS CLI for gpu-tts-toolkit.
 # Extracts salient text from media (files, URLs, or mixed), runs it through
-# gpu-tts-toolkit's media_to_tts.py with hallucination screening, and emits
-# a single narrated MP3.
+# media_to_tts.py with hallucination screening, and emits a single narrated MP3.
 #
 # Usage:
-#   speak <file|url> [file2 ...] [--voice p246] [--format mp3|wav]
-#         [--headers "H1" "H2" ...] [--keep-intermediates]
+#   transcribe <file|url> [file2 ...] [--voice p246] [--format mp3|wav]
+#              [--headers "H1" "H2" ...] [--keep-intermediates]
 #
 # Defaults: voice=p246, format=mp3, screening on, intermediates cleaned.
 
@@ -16,9 +15,9 @@ set -euo pipefail
 # 1. Locate the pipeline script (media_to_tts.py).
 #
 # Search order:
-#   a. $SPEAK_PIPELINE env override
+#   a. $TRANSCRIBE_PIPELINE env override
 #   b. Sibling in the same directory as this script (the normal clone layout)
-#   c. Sibling resolving the symlink (e.g. when `speak` is symlinked into PATH)
+#   c. Sibling resolving the symlink (when `transcribe` is symlinked into PATH)
 #   d. A few hardcoded local fallbacks for the author's dev machine
 # -----------------------------------------------------------------------------
 SELF_DIR_RAW="$(cd "$(dirname "$0")" && pwd)"
@@ -26,7 +25,7 @@ SELF_DIR_REAL="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 
 SCRIPT=""
 for CAND in \
-    "${SPEAK_PIPELINE:-}" \
+    "${TRANSCRIBE_PIPELINE:-}" \
     "${SELF_DIR_RAW}/media_to_tts.py" \
     "${SELF_DIR_REAL}/media_to_tts.py" \
     /media/drn2/External/working-tts-gpu/media_to_tts.py \
@@ -40,20 +39,20 @@ do
     fi
 done
 if [[ -z "$SCRIPT" ]]; then
-    echo "ERROR: media_to_tts.py not found. Clone https://github.com/olympus-terminal/gpu-tts-toolkit and run speak from there, or set \$SPEAK_PIPELINE." >&2
+    echo "ERROR: media_to_tts.py not found. Clone https://github.com/olympus-terminal/gpu-tts-toolkit and run transcribe from there, or set \$TRANSCRIBE_PIPELINE." >&2
     exit 1
 fi
 
 # -----------------------------------------------------------------------------
 # 2. Activate the TTS conda env (deep_voice_tts.py + torch + Coqui live there).
 #
-# Configurable via $SPEAK_CONDA_ENV (default: tts-app). Skip cleanly if either
-# the env or miniconda isn't present — the user may already be in a suitable
-# env, or may have torch installed globally.
+# Configurable via $TRANSCRIBE_CONDA_ENV (default: tts-app). Skip cleanly if
+# either the env or miniconda isn't present — the user may already be in a
+# suitable env, or may have torch installed globally.
 # -----------------------------------------------------------------------------
-SPEAK_CONDA_ENV="${SPEAK_CONDA_ENV:-tts-app}"
+TRANSCRIBE_CONDA_ENV="${TRANSCRIBE_CONDA_ENV:-tts-app}"
 
-if [[ -z "${CONDA_DEFAULT_ENV:-}" || "${CONDA_DEFAULT_ENV}" != "$SPEAK_CONDA_ENV" ]]; then
+if [[ -z "${CONDA_DEFAULT_ENV:-}" || "${CONDA_DEFAULT_ENV}" != "$TRANSCRIBE_CONDA_ENV" ]]; then
     CONDA_SH=""
     for C in \
         "$HOME/miniconda3/etc/profile.d/conda.sh" \
@@ -71,10 +70,10 @@ if [[ -z "${CONDA_DEFAULT_ENV:-}" || "${CONDA_DEFAULT_ENV}" != "$SPEAK_CONDA_ENV
         set +u
         # shellcheck disable=SC1091
         source "$CONDA_SH"
-        if conda env list 2>/dev/null | awk '{print $1}' | grep -qx "$SPEAK_CONDA_ENV"; then
-            conda activate "$SPEAK_CONDA_ENV"
+        if conda env list 2>/dev/null | awk '{print $1}' | grep -qx "$TRANSCRIBE_CONDA_ENV"; then
+            conda activate "$TRANSCRIBE_CONDA_ENV"
         else
-            echo "NOTE: conda env '$SPEAK_CONDA_ENV' not found; using current Python environment." >&2
+            echo "NOTE: conda env '$TRANSCRIBE_CONDA_ENV' not found; using current Python environment." >&2
         fi
         set -u
     else
@@ -129,7 +128,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ ${#INPUTS[@]} -eq 0 ]]; then
-    echo "ERROR: no input file/URL given. Usage: speak <file|url> [...]" >&2
+    echo "ERROR: no input file/URL given. Usage: transcribe <file|url> [...]" >&2
     exit 2
 fi
 
@@ -162,7 +161,7 @@ fi
 # 5. Scratch dir for pre-conversions / URL fetches
 # -----------------------------------------------------------------------------
 STAMP=$(date +%s)
-SCRATCH="/tmp/speak_${STAMP}"
+SCRATCH="/tmp/transcribe_${STAMP}"
 mkdir -p "$SCRATCH"
 # File recording paths we staged next to the user's input (not in $SCRATCH).
 # Uses a file rather than a bash array because pandoc_to_md is invoked via
@@ -212,7 +211,7 @@ pandoc_to_md() {
     stem=$(stem_of "$src")
     local parent
     parent=$(dirname "$(readlink -f "$src")")
-    local out="${parent}/${stem}.speak.md"
+    local out="${parent}/${stem}.transcribe.md"
     if ! pandoc -f "$fmt" -t gfm -o "$out" "$src" 2>"$SCRATCH/pandoc.err"; then
         echo "ERROR: pandoc failed converting $src (format=$fmt):" >&2
         cat "$SCRATCH/pandoc.err" >&2
