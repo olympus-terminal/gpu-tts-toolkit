@@ -38,35 +38,76 @@ class DeepVoiceTTS:
     }
 
     # Cloned voice profiles (reference audio + transcript)
-    CLONED_VOICES = {
-        "mm": {
-            "description": "Matthew McConaughey clone",
-            "reference_audio": "voice_references/mcconaughey_reference.wav",
-            "reference_text": "voice_references/mcconaughey_transcript.txt",
-        },
-        "wh": {
-            "description": "Werner Herzog clone",
-            "reference_audio": "voice_references/herzog_reference.wav",
-            "reference_text": "voice_references/herzog_transcript.txt",
-        },
-    }
+    # Add your own voice clones here:
+    #   "key": {
+    #       "description": "My custom voice",
+    #       "reference_audio": "voice_references/my_ref.wav",
+    #       "reference_text": "voice_references/my_ref_transcript.txt",
+    #   },
+    CLONED_VOICES = {}
 
     # Favorite deep male voices for random selection
     FAVORITE_VOICES = ["dylan", "eric", "ryan", "uncle_fu"]
+
+    @staticmethod
+    def _detect_gpu_mem():
+        """Return (total_gib, free_gib) for cuda:0, or (0, 0) if unavailable."""
+        if not torch.cuda.is_available():
+            return 0.0, 0.0
+        props = torch.cuda.get_device_properties(0)
+        total = props.total_memory / (1024 ** 3)
+        free = (props.total_memory - torch.cuda.memory_reserved(0)) / (1024 ** 3)
+        return round(total, 1), round(free, 1)
+
+    @staticmethod
+    def _detect_sys_mem():
+        """Return total system RAM in GiB."""
+        try:
+            with open('/proc/meminfo') as f:
+                for line in f:
+                    if line.startswith('MemTotal:'):
+                        kb = int(line.split()[1])
+                        return round(kb / (1024 ** 2), 1)
+        except Exception:
+            pass
+        return 16.0  # conservative fallback
+
+    @staticmethod
+    def _parse_hybrid_spec(spec):
+        """Parse hybrid voice spec like 'lr,wh,ps' or 'lr:0.5,wh:0.3,ps:0.2'.
+
+        Returns list of (key, weight) tuples with weights normalized to sum=1.0.
+        """
+        parts = [p.strip() for p in spec.split(",")]
+        result = []
+        for part in parts:
+            if ":" in part:
+                key, weight = part.split(":", 1)
+                result.append((key.strip().lower(), float(weight)))
+            else:
+                result.append((part.strip().lower(), 1.0))
+        # Normalize weights
+        total = sum(w for _, w in result)
+        if total <= 0:
+            raise ValueError("Hybrid weights must sum to a positive number")
+        result = [(k, w / total) for k, w in result]
+        return result
 
     def __init__(
         self,
         voice_profile="random",
         output_format="mp3",
-        model_size="1.7B",
+        model_size=None,
         cleanup=True,
         use_flash_attn=True,
         voice_instruct=None,
         reference_audio=None,
         reference_text=None,
         voice_description=None,
-        cpu_offload=False,
+        cpu_offload=None,
         speed=1.0,
+        hybrid=None,
+        hybrid_method="embedding",
     ):
         """
         Initialize Qwen3-TTS pipeline
@@ -74,14 +115,14 @@ class DeepVoiceTTS:
         Args:
             voice_profile: Built-in voice name, "random", "clone", or "design"
             output_format: Output format (mp3 or wav)
-            model_size: Model size ("0.6B" or "1.7B")
+            model_size: Model size ("0.6B" or "1.7B"). Auto-detected from VRAM if None.
             cleanup: Remove intermediate files after generation
             use_flash_attn: Use FlashAttention 2 for efficiency
             voice_instruct: Custom instruction for voice style
             reference_audio: Path to reference audio for voice cloning
             reference_text: Transcript of reference audio
             voice_description: Text description for voice design
-            cpu_offload: Enable CPU offloading for low VRAM systems
+            cpu_offload: Enable CPU offloading. Auto-enabled when VRAM < 8 GB if None.
             speed: Playback speed multiplier (0.5-2.0, default 1.0)
         """
         # GPU only - no CPU fallback
@@ -92,20 +133,48 @@ class DeepVoiceTTS:
         self.output_format = output_format
         self.cleanup = cleanup
         self.use_flash_attn = use_flash_attn
+        self.speed = max(0.5, min(2.0, speed))  # Clamp to valid range
+
+        # --- Hybrid voice blending ---
+        self.hybrid_voices = None
+        self.hybrid_method = hybrid_method
+        if hybrid:
+            self.hybrid_voices = self._parse_hybrid_spec(hybrid)
+            # Validate all keys exist in CLONED_VOICES
+            for key, _ in self.hybrid_voices:
+                if key not in self.CLONED_VOICES:
+                    raise ValueError(
+                        f"Unknown clone voice '{key}' in hybrid spec. "
+                        f"Available: {', '.join(self.CLONED_VOICES.keys())}"
+                    )
+
+        # --- VRAM-aware defaults ---
+        self.gpu_total, self.gpu_free = self._detect_gpu_mem()
+        self.sys_mem = self._detect_sys_mem()
+
+        if model_size is None:
+            # 1.7B needs ~16 GB, 0.6B needs ~8 GB
+            model_size = "1.7B" if self.gpu_total >= 18 else "0.6B"
         self.model_size = model_size
+
+        if cpu_offload is None:
+            # Auto-enable when the model won't fit entirely on the GPU
+            min_vram = 16.0 if model_size == "1.7B" else 8.0
+            cpu_offload = self.gpu_total < min_vram
+        self.cpu_offload = cpu_offload
+
         self.voice_instruct = voice_instruct
         self.reference_audio = reference_audio
         self.reference_text = reference_text
         self.voice_description = voice_description
-        self.cpu_offload = cpu_offload
-        self.speed = max(0.5, min(2.0, speed))  # Clamp to valid range
 
         # Determine model type and voice settings
         self.mode = self._determine_mode(voice_profile)
         self.voice_profile = self._setup_voice_profile(voice_profile)
 
-        # Text processing settings
-        self.chunk_size = 500  # Qwen3-TTS handles longer sequences well
+        # Text processing settings — smaller chunks when offloading to avoid
+        # long GPU↔CPU data shuffles per inference call
+        self.chunk_size = 300 if self.cpu_offload else 500
 
         # Common tech acronyms
         self.common_acronyms = {
@@ -134,11 +203,14 @@ class DeepVoiceTTS:
             'NLP': 'N.L.P.'
         }
 
+        print(f"GPU: {torch.cuda.get_device_name(0)} ({self.gpu_total:.0f} GB total, ~{self.gpu_free:.0f} GB free)")
+        print(f"RAM: {self.sys_mem:.0f} GB")
         print(f"Mode: {self.mode}")
-        print(f"Model: Qwen3-TTS-12Hz-{model_size}")
+        print(f"Model: Qwen3-TTS-12Hz-{self.model_size}")
         print(f"Device: {self.device}")
         print(f"FlashAttention 2: {'enabled' if use_flash_attn else 'disabled'}")
-        print(f"CPU Offload: {'enabled' if cpu_offload else 'disabled'}")
+        print(f"CPU Offload: {'enabled' if self.cpu_offload else 'disabled'}")
+        print(f"Chunk size: {self.chunk_size} chars")
         print(f"Speed: {self.speed:.0%}")
         print(f"Cleanup: {'enabled' if cleanup else 'disabled'}")
 
@@ -146,7 +218,9 @@ class DeepVoiceTTS:
 
     def _determine_mode(self, voice_profile):
         """Determine operating mode based on settings"""
-        if self.reference_audio and self.reference_text:
+        if self.hybrid_voices:
+            return "hybrid"
+        elif self.reference_audio and self.reference_text:
             return "clone"
         elif self.voice_description:
             return "design"
@@ -155,7 +229,15 @@ class DeepVoiceTTS:
 
     def _setup_voice_profile(self, voice_profile):
         """Setup voice profile based on input"""
-        if self.mode == "clone":
+        if self.mode == "hybrid":
+            labels = [f"{k}:{w:.2f}" for k, w in self.hybrid_voices]
+            return {
+                "type": "hybrid",
+                "voices": self.hybrid_voices,
+                "method": self.hybrid_method,
+                "description": f"Hybrid blend: {', '.join(labels)}",
+            }
+        elif self.mode == "clone":
             return {
                 "type": "clone",
                 "reference_audio": self.reference_audio,
@@ -231,7 +313,7 @@ class DeepVoiceTTS:
         # Select model based on mode and size
         if self.mode == "design":
             model_name = f"Qwen/Qwen3-TTS-12Hz-{self.model_size}-VoiceDesign"
-        elif self.mode == "clone":
+        elif self.mode in ("clone", "hybrid"):
             model_name = f"Qwen/Qwen3-TTS-12Hz-{self.model_size}-Base"
         else:
             model_name = f"Qwen/Qwen3-TTS-12Hz-{self.model_size}-CustomVoice"
@@ -252,9 +334,12 @@ class DeepVoiceTTS:
         # Configure device mapping
         if self.cpu_offload:
             # Use auto device map for CPU offloading - splits model across GPU/CPU
+            # Reserve ~1.5 GB on GPU for inference overhead; give the rest to the model
+            gpu_budget = max(1, int(self.gpu_total - 1.5))
+            cpu_budget = max(8, int(self.sys_mem - 4))
             load_kwargs["device_map"] = "auto"
-            load_kwargs["max_memory"] = {0: "10GiB", "cpu": "32GiB"}
-            print("Using automatic device mapping with CPU offloading...")
+            load_kwargs["max_memory"] = {0: f"{gpu_budget}GiB", "cpu": f"{cpu_budget}GiB"}
+            print(f"CPU offload: GPU budget {gpu_budget} GiB, CPU budget {cpu_budget} GiB")
         else:
             load_kwargs["device_map"] = self.device
 
@@ -278,7 +363,9 @@ class DeepVoiceTTS:
                 raise
 
         # Pre-compute voice clone prompt if cloning
-        if self.mode == "clone":
+        if self.mode == "hybrid":
+            self._prepare_hybrid_clone_prompts()
+        elif self.mode == "clone":
             self._prepare_clone_prompt()
 
     def _prepare_clone_prompt(self):
@@ -293,6 +380,96 @@ class DeepVoiceTTS:
         except Exception as e:
             print(f"Error preparing clone prompt: {e}")
             raise
+
+    def _prepare_hybrid_clone_prompts(self):
+        """Pre-compute clone prompts for all hybrid voices and build blended prompts."""
+        from qwen_tts import VoiceClonePromptItem
+        import tempfile
+
+        script_dir = Path(__file__).parent
+        self.hybrid_clone_prompts = {}
+
+        # Step 1: create individual clone prompts for each speaker
+        for key, weight in self.hybrid_voices:
+            cloned = self.CLONED_VOICES[key]
+            ref_audio = str(script_dir / cloned["reference_audio"])
+            ref_text_path = script_dir / cloned["reference_text"]
+            with open(ref_text_path, "r", encoding="utf-8") as f:
+                ref_text = f.read().strip()
+
+            print(f"Preparing clone prompt for '{key}' (weight {weight:.2f})...")
+            prompts = self.model.create_voice_clone_prompt(
+                ref_audio=ref_audio,
+                ref_text=ref_text,
+            )
+            self.hybrid_clone_prompts[key] = prompts[0]
+
+        # Step 2: Build embedding-averaged prompt (Approach A)
+        embeddings = []
+        weights = []
+        for key, weight in self.hybrid_voices:
+            embeddings.append(self.hybrid_clone_prompts[key].ref_spk_embedding)
+            weights.append(weight)
+
+        weight_tensor = torch.tensor(weights, dtype=embeddings[0].dtype,
+                                     device=embeddings[0].device)
+        stacked = torch.stack(embeddings)  # (N, D)
+        blended_embedding = (stacked * weight_tensor.unsqueeze(1)).sum(dim=0)
+
+        self.hybrid_embedding_prompt = VoiceClonePromptItem(
+            ref_code=None,
+            ref_spk_embedding=blended_embedding,
+            x_vector_only_mode=True,
+            icl_mode=False,
+        )
+        print("Hybrid embedding-averaged prompt ready")
+
+        # Step 3: Build concatenated reference prompt (Approach B)
+        # Trim each speaker's WAV to ~equal share of 10s total, stitch with crossfade
+        n_speakers = len(self.hybrid_voices)
+        per_speaker_ms = int(10000 / n_speakers)  # ~3.3s each for 3 speakers
+
+        segments = []
+        transcripts = []
+        for key, _weight in self.hybrid_voices:
+            cloned = self.CLONED_VOICES[key]
+            ref_audio = str(script_dir / cloned["reference_audio"])
+            ref_text_path = script_dir / cloned["reference_text"]
+            with open(ref_text_path, "r", encoding="utf-8") as f:
+                ref_text = f.read().strip()
+
+            audio_seg = AudioSegment.from_file(ref_audio)
+            # Trim to per_speaker_ms (from the start, where speech is most clear)
+            trimmed = audio_seg[:per_speaker_ms]
+            segments.append(trimmed)
+            # Proportionally trim transcript
+            ratio = min(1.0, per_speaker_ms / len(audio_seg))
+            words = ref_text.split()
+            n_words = max(1, int(len(words) * ratio))
+            transcripts.append(" ".join(words[:n_words]))
+
+        # Stitch with 50ms crossfade
+        combined_audio = segments[0]
+        for seg in segments[1:]:
+            if len(combined_audio) > 50 and len(seg) > 50:
+                combined_audio = combined_audio.append(seg, crossfade=50)
+            else:
+                combined_audio = combined_audio + seg
+
+        combined_transcript = " ".join(transcripts)
+
+        # Write temp WAV for clone prompt extraction
+        tmp_wav = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+        try:
+            combined_audio.export(tmp_wav.name, format="wav")
+            concat_prompts = self.model.create_voice_clone_prompt(
+                ref_audio=tmp_wav.name,
+                ref_text=combined_transcript,
+            )
+            self.hybrid_concat_prompt = concat_prompts[0]
+            print("Hybrid concatenated-reference prompt ready")
+        finally:
+            os.unlink(tmp_wav.name)
 
     def detect_acronyms(self, text):
         """Improved acronym detection with context awareness"""
@@ -401,9 +578,76 @@ class DeepVoiceTTS:
 
         return chunks
 
-    def generate_audio_chunk(self, text, output_path):
+    def _generate_hybrid_chunk_embedding(self, text, output_path):
+        """Approach A: generate using the blended speaker embedding."""
+        wavs, sr = self.model.generate_voice_clone(
+            text=text,
+            voice_clone_prompt=[self.hybrid_embedding_prompt],
+            language="English",
+        )
+        audio_data = wavs[0]
+        if hasattr(audio_data, "cpu"):
+            audio_data = audio_data.cpu().numpy()
+        sf.write(output_path, audio_data, sr)
+        return True
+
+    def _generate_hybrid_chunk_concat(self, text, output_path):
+        """Approach B: generate using the concatenated reference prompt."""
+        wavs, sr = self.model.generate_voice_clone(
+            text=text,
+            voice_clone_prompt=[self.hybrid_concat_prompt],
+            language="English",
+        )
+        audio_data = wavs[0]
+        if hasattr(audio_data, "cpu"):
+            audio_data = audio_data.cpu().numpy()
+        sf.write(output_path, audio_data, sr)
+        return True
+
+    def _generate_hybrid_chunk_audio(self, text, output_path):
+        """Approach C: generate with each speaker separately, blend audio arrays."""
+        all_arrays = []
+        sr_out = None
+
+        for key, weight in self.hybrid_voices:
+            prompt = self.hybrid_clone_prompts[key]
+            wavs, sr = self.model.generate_voice_clone(
+                text=text,
+                voice_clone_prompt=[prompt],
+                language="English",
+            )
+            audio_data = wavs[0]
+            if hasattr(audio_data, "cpu"):
+                audio_data = audio_data.cpu().numpy()
+            all_arrays.append((audio_data, weight))
+            sr_out = sr
+
+        # Zero-pad to max length
+        max_len = max(a.shape[0] for a, _ in all_arrays)
+        blended = np.zeros(max_len, dtype=np.float64)
+        for arr, weight in all_arrays:
+            padded = np.zeros(max_len, dtype=np.float64)
+            padded[: arr.shape[0]] = arr.astype(np.float64)
+            blended += padded * weight
+
+        sf.write(output_path, blended.astype(np.float32), sr_out)
+        return True
+
+    def generate_audio_chunk(self, text, output_path, method_override=None):
         """Generate audio for a text chunk"""
         try:
+            # Hybrid mode dispatch
+            if self.mode == "hybrid":
+                method = method_override or self.hybrid_method
+                if method == "embedding":
+                    return self._generate_hybrid_chunk_embedding(text, output_path)
+                elif method == "concat":
+                    return self._generate_hybrid_chunk_concat(text, output_path)
+                elif method == "audio":
+                    return self._generate_hybrid_chunk_audio(text, output_path)
+                else:
+                    raise ValueError(f"Unknown hybrid method: {method}")
+
             if self.mode == "clone":
                 wavs, sr = self.model.generate_voice_clone(
                     text=text,
@@ -446,8 +690,15 @@ class DeepVoiceTTS:
 
         print("Scanning for audio hallucinations...")
 
-        # Use small model for speed
-        model = WhisperModel("base", device="cuda", compute_type="float16")
+        # On low-VRAM GPUs the TTS model is still resident; run Whisper on CPU
+        # to avoid OOM.  On larger GPUs, use GPU with float16 for speed.
+        if self.gpu_total < 12:
+            whisper_device = "cpu"
+            whisper_dtype = "int8"
+        else:
+            whisper_device = "cuda"
+            whisper_dtype = "float16"
+        model = WhisperModel("base", device=whisper_device, compute_type=whisper_dtype)
         segments, _ = model.transcribe(str(audio_path), word_timestamps=True)
         segments = list(segments)
 
@@ -590,6 +841,108 @@ class DeepVoiceTTS:
                 print(f"Cleaned up {files_removed} intermediate files")
         except Exception as e:
             print(f"Warning: Cleanup failed: {e}")
+
+    def process_text_file_hybrid_all(self, input_file, output_name=None):
+        """Run all 3 hybrid methods for side-by-side comparison."""
+        input_path = Path(input_file)
+        if not input_path.exists():
+            print(f"\nError: File not found: {input_file}")
+            return None
+
+        base_name = output_name or input_path.stem
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_dir = Path(f"{base_name}_hybrid_{timestamp}")
+        output_dir.mkdir(exist_ok=True)
+
+        # Read and preprocess once
+        print(f"\nReading: {input_file}")
+        with open(input_file, "r", encoding="utf-8") as f:
+            text = f.read()
+        if len(text.strip()) < 10:
+            print(f"\nError: File is empty or too short")
+            return None
+
+        original_length = len(text)
+        text = self.preprocess_text(text)
+        print(f"Preprocessed: {original_length} -> {len(text)} chars")
+        chunks = self.smart_chunk_text(text)
+        print(f"Created {len(chunks)} chunks")
+
+        methods = [
+            ("A_embedding_avg", "embedding"),
+            ("B_concat_ref", "concat"),
+            ("C_audio_blend", "audio"),
+        ]
+
+        results = {}
+        for label, method in methods:
+            method_dir = output_dir / label
+            method_dir.mkdir(exist_ok=True)
+            chunks_dir = method_dir / "chunks"
+            chunks_dir.mkdir(exist_ok=True)
+
+            print(f"\n{'='*60}")
+            print(f"Generating: {label} (method={method})")
+            print(f"{'='*60}")
+
+            audio_files = []
+            for i, chunk in enumerate(tqdm(chunks, desc=label)):
+                chunk_file = chunks_dir / f"chunk_{i:04d}.wav"
+                if self.generate_audio_chunk(chunk, str(chunk_file), method_override=method):
+                    audio_files.append(str(chunk_file))
+
+            print(f"Generated: {len(audio_files)}/{len(chunks)} chunks")
+
+            # Combine
+            final_output = None
+            if audio_files:
+                final_output = method_dir / f"{base_name}_{label}.{self.output_format}"
+                try:
+                    combined = AudioSegment.from_file(audio_files[0])
+                    for af in audio_files[1:]:
+                        combined = combined.append(AudioSegment.from_file(af), crossfade=50)
+                    combined = combined.normalize()
+
+                    if self.speed != 1.0:
+                        new_frame_rate = int(combined.frame_rate * self.speed)
+                        combined = combined._spawn(combined.raw_data, overrides={
+                            "frame_rate": new_frame_rate
+                        }).set_frame_rate(combined.frame_rate)
+
+                    if self.output_format == "mp3":
+                        combined.export(final_output, format="mp3", bitrate="192k")
+                    else:
+                        combined.export(final_output, format="wav")
+
+                    file_size = final_output.stat().st_size / (1024 * 1024)
+                    print(f"Output: {final_output} ({file_size:.2f} MB)")
+                    results[label] = str(final_output)
+                except Exception as e:
+                    print(f"Error combining {label}: {e}")
+
+            # Cleanup chunks
+            if final_output and final_output.exists():
+                self.cleanup_intermediate_files(chunks_dir, method_dir)
+
+        # Save metadata
+        metadata = {
+            "input_file": str(input_file),
+            "mode": "hybrid",
+            "hybrid_voices": [{"key": k, "weight": w} for k, w in self.hybrid_voices],
+            "methods": [label for label, _ in methods],
+            "model_size": self.model_size,
+            "device": self.device,
+            "chunks": len(chunks),
+            "timestamp": timestamp,
+            "outputs": results,
+        }
+        with open(output_dir / "metadata.json", "w") as f:
+            json.dump(metadata, f, indent=2, default=str)
+
+        print(f"\nComplete! Output: {output_dir}")
+        for label, path in results.items():
+            print(f"  {label}: {path}")
+        return str(output_dir)
 
     def process_text_file(self, input_file, output_name=None):
         """Process text file with Qwen3-TTS"""
@@ -734,14 +1087,28 @@ Examples:
   # Custom voice instruction
   python deep_voice_tts_v3.py input.txt --voice dylan --instruct "Speak slowly with gravitas"
 
-Memory optimization (for limited VRAM):
-  # Use smaller 0.6B model (recommended for 8-12GB VRAM)
+Memory optimization (auto-detected from VRAM, or override manually):
+  # Force smaller 0.6B model
   python deep_voice_tts_v3.py input.txt --voice dylan --model-size 0.6B
 
-  # CPU offloading (splits model across GPU and CPU)
+  # Force CPU offloading (auto-enabled when VRAM < model requirement)
   python deep_voice_tts_v3.py input.txt --voice dylan --cpu-offload
 
-Available voices: dylan, eric, ryan, aiden, uncle_fu, vivian, serena, ono_anna, sohee, mm (McConaughey), wh (Herzog)
+Hybrid voice blending (combine cloned voices):
+  # Equal-weight blend with embedding average
+  python deep_voice_tts_v3.py input.txt --hybrid voice1,voice2
+
+  # Weighted blend
+  python deep_voice_tts_v3.py input.txt --hybrid voice1:0.5,voice2:0.3,voice3:0.2
+
+  # Specific method
+  python deep_voice_tts_v3.py input.txt --hybrid voice1,voice2 --hybrid-method concat
+
+  # All 3 methods side-by-side comparison
+  python deep_voice_tts_v3.py input.txt --hybrid voice1,voice2 --hybrid-method all
+
+Available built-in voices: dylan, eric, ryan, aiden, uncle_fu, vivian, serena, ono_anna, sohee
+Add your own cloned voices by editing CLONED_VOICES in the script.
         """
     )
 
@@ -751,8 +1118,8 @@ Available voices: dylan, eric, ryan, aiden, uncle_fu, vivian, serena, ono_anna, 
     parser.add_argument("--format", choices=["mp3", "wav"], default="mp3",
                        help="Output format")
     parser.add_argument("--output-name", help="Custom output name")
-    parser.add_argument("--model-size", choices=["0.6B", "1.7B"], default="1.7B",
-                       help="Model size (default: 1.7B)")
+    parser.add_argument("--model-size", choices=["0.6B", "1.7B"], default=None,
+                       help="Model size (default: auto-detect from VRAM)")
     parser.add_argument("--no-cleanup", action="store_true",
                        help="Keep intermediate chunk files")
     parser.add_argument("--no-flash-attn", action="store_true",
@@ -760,8 +1127,8 @@ Available voices: dylan, eric, ryan, aiden, uncle_fu, vivian, serena, ono_anna, 
     parser.add_argument("--instruct", help="Custom voice instruction")
 
     # Memory optimization options
-    parser.add_argument("--cpu-offload", action="store_true",
-                       help="Enable CPU offloading for low VRAM GPUs")
+    parser.add_argument("--cpu-offload", action="store_true", default=None,
+                       help="Enable CPU offloading (auto-enabled when VRAM < model requirement)")
 
     # Audio options
     parser.add_argument("--speed", type=float, default=1.0,
@@ -773,6 +1140,13 @@ Available voices: dylan, eric, ryan, aiden, uncle_fu, vivian, serena, ono_anna, 
 
     # Voice design option
     parser.add_argument("--design", help="Voice description for voice design mode")
+
+    # Hybrid voice blending
+    parser.add_argument("--hybrid",
+                       help="Blend cloned voices: 'lr,wh,ps' or 'lr:0.5,wh:0.3,ps:0.2'")
+    parser.add_argument("--hybrid-method", default="embedding",
+                       choices=["embedding", "concat", "audio", "all"],
+                       help="Hybrid method: embedding (avg), concat (ref stitch), audio (waveform blend), all (compare)")
 
     parser.add_argument("--list-voices", action="store_true",
                        help="List available voices and exit")
@@ -789,13 +1163,17 @@ Available voices: dylan, eric, ryan, aiden, uncle_fu, vivian, serena, ono_anna, 
         for name, info in DeepVoiceTTS.BUILTIN_VOICES.items():
             if name not in DeepVoiceTTS.FAVORITE_VOICES:
                 print(f"  {name:12} - {info['description']}")
-        print("\nCloned voices:")
-        for name, info in DeepVoiceTTS.CLONED_VOICES.items():
-            print(f"  {name:12} - {info['description']}")
+        if DeepVoiceTTS.CLONED_VOICES:
+            print("\nCloned voices:")
+            for name, info in DeepVoiceTTS.CLONED_VOICES.items():
+                print(f"  {name:12} - {info['description']}")
         print("\nModes:")
         print("  --voice <name>    Use built-in or cloned voice")
         print("  --clone-audio/--clone-text    Clone from reference")
         print("  --design \"description\"    Design voice from text")
+        print("  --hybrid key1,key2    Blend cloned voices (equal weight)")
+        print("  --hybrid key1:0.5,key2:0.3    Blend with weights")
+        print("  --hybrid-method embedding|concat|audio|all")
         return
 
     if not args.input_file:
@@ -811,6 +1189,15 @@ Available voices: dylan, eric, ryan, aiden, uncle_fu, vivian, serena, ono_anna, 
         print("Error: --clone-audio required with --clone-text")
         sys.exit(1)
 
+    # Validate hybrid mode conflicts
+    if args.hybrid:
+        if args.design:
+            print("Error: --hybrid cannot be used with --design")
+            sys.exit(1)
+        if args.clone_audio:
+            print("Error: --hybrid cannot be used with --clone-audio")
+            sys.exit(1)
+
     try:
         pipeline = DeepVoiceTTS(
             voice_profile=args.voice,
@@ -824,16 +1211,24 @@ Available voices: dylan, eric, ryan, aiden, uncle_fu, vivian, serena, ono_anna, 
             voice_description=args.design,
             cpu_offload=args.cpu_offload,
             speed=args.speed,
+            hybrid=args.hybrid,
+            hybrid_method=args.hybrid_method,
         )
     except Exception as e:
         print(f"\nError initializing TTS pipeline: {e}")
         sys.exit(1)
 
     try:
-        result = pipeline.process_text_file(
-            args.input_file,
-            output_name=args.output_name
-        )
+        if args.hybrid and args.hybrid_method == "all":
+            result = pipeline.process_text_file_hybrid_all(
+                args.input_file,
+                output_name=args.output_name,
+            )
+        else:
+            result = pipeline.process_text_file(
+                args.input_file,
+                output_name=args.output_name,
+            )
         if result is None:
             sys.exit(1)
     except Exception as e:

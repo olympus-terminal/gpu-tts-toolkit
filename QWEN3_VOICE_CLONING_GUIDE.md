@@ -256,11 +256,9 @@ gpu-tts-toolkit/
 ├── deep_voice_tts_v3.py          # Main production script
 ├── requirements-qwen3.txt        # pip requirements
 ├── install_dgx.sh                # Full install script (conda + pip + flash-attn)
-├── voice_references/             # Reference audio for pre-configured clones
-│   ├── mcconaughey_reference.wav
-│   ├── mcconaughey_transcript.txt
-│   ├── herzog_reference.wav
-│   └── herzog_transcript.txt
+├── voice_references/             # Put your reference audio here for cloning
+│   ├── my_voice_reference.wav
+│   └── my_voice_transcript.txt
 └── QWEN3_VOICE_CLONING_GUIDE.md  # This file
 ```
 

@@ -124,4 +124,12 @@ Thumbs.db
 benchmark_results/
 profiling/
 *.prof
-*.statsvoice_references/
+*.stats
+
+# Voice reference audio (keep out of public repo)
+voice_references/
+
+# Tripitaka / ATI archive
+tripitaka/ati_archive/
+tripitaka/suttas/
+tripitaka/audio/
