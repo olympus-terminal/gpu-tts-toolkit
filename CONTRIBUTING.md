@@ -1,320 +1,222 @@
-# Contributing to GPU-Accelerated TTS Toolkit
+# Contributing to Olympus Tools
 
-Thank you for your interest in contributing to the GPU-Accelerated TTS Toolkit! This guide will help you get started.
+First off, thank you for considering contributing to Olympus Tools! 🎉
 
-## 🚀 Getting Started
+The following is a set of guidelines for contributing to our repositories. These are mostly guidelines, not rules. Use your best judgment, and feel free to propose changes to this document in a pull request.
 
-### Prerequisites
+## Table of Contents
 
-- NVIDIA GPU with CUDA support
-- Python 3.8 or higher
-- CUDA 11.0+ and cuDNN 8.0+
-- Git
+- [Code of Conduct](#code-of-conduct)
+- [How Can I Contribute?](#how-can-i-contribute)
+  - [Reporting Bugs](#reporting-bugs)
+  - [Suggesting Enhancements](#suggesting-enhancements)
+  - [Adding New Tools](#adding-new-tools)
+  - [Improving Documentation](#improving-documentation)
+- [Development Process](#development-process)
+- [Style Guidelines](#style-guidelines)
+- [Testing](#testing)
 
-### Development Setup
+## Code of Conduct
 
-1. Fork and clone the repository:
-```bash
-git clone https://github.com/yourusername/gpu-tts-toolkit.git
-cd gpu-tts-toolkit
-```
+This project and everyone participating in it is governed by our Code of Conduct. By participating, you are expected to uphold this code. Please be respectful and constructive in all interactions.
 
-2. Create a virtual environment:
-```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
+## How Can I Contribute?
 
-3. Install development dependencies:
-```bash
-pip install -r requirements.txt
-pip install -r requirements-dev.txt
-```
+### Reporting Bugs
 
-4. Install pre-commit hooks:
-```bash
-pre-commit install
-```
+Before creating bug reports, please check existing issues to avoid duplicates. When you create a bug report, include as many details as possible:
 
-## 📝 Contribution Guidelines
-
-### Code Style
-
-- Follow PEP 8 guidelines
-- Use type hints for all function parameters and returns
-- Maximum line length: 100 characters
-- Use descriptive variable names
-- Add docstrings to all functions and classes
-
-### Performance Standards
-
-All contributions should maintain or improve performance:
-
-- GPU utilization should be >80% during synthesis
-- RTF (Real-Time Factor) should be <0.1 for standard models
-- Memory usage should be optimized for batch processing
-- Include benchmarks for any performance-critical changes
-
-### Testing
-
-- Write unit tests for new functionality
-- Ensure all tests pass before submitting PR
-- Include GPU performance tests where applicable
-- Test on multiple GPU architectures if possible
-
-```bash
-# Run tests
-python -m pytest tests/
-
-# Run with GPU tests
-python -m pytest tests/ --gpu
-
-# Run performance benchmarks
-python -m pytest tests/benchmarks/
-```
-
-## 🎯 Areas for Contribution
-
-### High Priority
-
-1. **New Model Architectures**
-   - Implement state-of-the-art TTS models
-   - Optimize existing models for GPU
-   - Add multi-speaker support
-
-2. **Language Support**
-   - Add phonemizers for new languages
-   - Implement language-specific text normalization
-   - Create multilingual models
-
-3. **Performance Optimization**
-   - Custom CUDA kernels for critical operations
-   - TensorRT integration improvements
-   - Memory optimization techniques
-
-4. **Voice Cloning**
-   - Improve few-shot voice cloning
-   - Real-time voice conversion
-   - Voice style transfer
-
-### Medium Priority
-
-1. **Audio Quality**
-   - Implement new vocoders
-   - Denoisers and enhancers
-   - Prosody control improvements
-
-2. **API Features**
-   - Additional streaming protocols
-   - GraphQL support
-   - Batch processing optimizations
-
-3. **Documentation**
-   - Tutorial notebooks
-   - Architecture diagrams
-   - Performance tuning guides
-
-### Good First Issues
-
-- Add support for new audio formats
-- Improve error messages
-- Add more example scripts
-- Enhance logging capabilities
-- Write documentation for existing features
-
-## 🔧 Development Workflow
-
-### 1. Create an Issue
-
-Before starting work, create or find an issue describing the feature/bug.
-
-### 2. Branch Naming
-
-```bash
-git checkout -b feature/new-vocoder
-git checkout -b fix/memory-leak
-git checkout -b docs/api-guide
-```
-
-### 3. Commit Messages
-
-Follow conventional commits:
-```
-feat: add VITS model support
-fix: resolve CUDA memory leak in batch processing
-docs: update API reference for streaming
-perf: optimize mel-spectrogram generation by 15%
-```
-
-### 4. Pull Request Process
-
-1. Update documentation for any API changes
-2. Add tests for new functionality
-3. Ensure benchmarks pass performance thresholds
-4. Update CHANGELOG.md
-5. Request review from maintainers
-
-### PR Template
-
+**Bug Report Template:**
 ```markdown
-## Description
-Brief description of changes
+**Tool Name**: [e.g., neural_tts.py]
+**Environment**: [OS, Python/Bash version]
+**Description**: [Clear description of the bug]
+**Steps to Reproduce**:
+1. [First step]
+2. [Second step]
+3. [See error]
+**Expected Behavior**: [What should happen]
+**Actual Behavior**: [What actually happens]
+**Additional Context**: [Logs, screenshots, etc.]
+```
 
-## Type of Change
-- [ ] Bug fix
-- [ ] New feature
-- [ ] Performance improvement
-- [ ] Documentation update
+### Suggesting Enhancements
 
-## Performance Impact
-- RTF before: X.XX
-- RTF after: X.XX
-- GPU memory usage: XX GB
+Enhancement suggestions are tracked as GitHub issues. When creating an enhancement suggestion, include:
+
+- **Use case**: Why is this enhancement needed?
+- **Proposed solution**: How should it work?
+- **Alternative solutions**: Other ways to solve it
+- **Additional context**: Examples, mockups, etc.
+
+### Adding New Tools
+
+We love new tools! When submitting a new tool:
+
+1. **Ensure it fits** the repository's scope
+2. **Follow naming conventions**:
+   - Shell scripts: `descriptive-name.sh`
+   - Python scripts: `descriptive_name.py`
+   - No spaces, clear purpose
+3. **Include documentation** in the script header:
+   ```bash
+   #!/bin/bash
+   # Tool: awesome-tool.sh
+   # Description: Does awesome things
+   # Usage: ./awesome-tool.sh input.txt output.txt
+   # Requirements: bash 4.0+, awk
+   # Author: Your Name
+   # Date: YYYY-MM-DD
+   ```
+4. **Add usage examples**
+5. **Test on Linux and macOS** (if possible)
+6. **Update the README** with your tool
+
+### Improving Documentation
+
+Documentation improvements are always welcome! This includes:
+- Fixing typos
+- Adding examples
+- Clarifying usage
+- Translating documentation
+- Adding diagrams or visualizations
+
+## Development Process
+
+1. **Fork the repository**
+2. **Create a feature branch**: `git checkout -b feature/amazing-tool`
+3. **Make your changes**
+4. **Test thoroughly**
+5. **Commit with clear messages**:
+   ```
+   Add neural network motif finder
+   
+   - Implements LSTM-based motif discovery
+   - Supports FASTA input
+   - Outputs confidence scores
+   - Includes test data
+   ```
+6. **Push to your fork**: `git push origin feature/amazing-tool`
+7. **Submit a Pull Request**
+
+## Style Guidelines
+
+### Shell Scripts
+
+```bash
+#!/bin/bash
+# Use consistent indentation (2 spaces)
+# Check arguments
+if [ $# -eq 0 ]; then
+  echo "Usage: $0 <input_file>"
+  exit 1
+fi
+
+# Use meaningful variable names
+input_file="$1"
+output_file="${input_file%.txt}_processed.txt"
+
+# Handle errors
+set -euo pipefail
+
+# Add progress indicators for long operations
+echo "Processing $input_file..."
+```
+
+### Python Scripts
+
+```python
+#!/usr/bin/env python3
+"""
+Tool description and usage information.
+"""
+
+import argparse
+import sys
+from typing import List, Optional
+
+def main(args: argparse.Namespace) -> None:
+    """Main function with type hints."""
+    # Implementation here
+    pass
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Tool description")
+    parser.add_argument("input", help="Input file")
+    parser.add_argument("-o", "--output", help="Output file")
+    args = parser.parse_args()
+    
+    try:
+        main(args)
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+```
+
+### General Guidelines
+
+- **Use descriptive variable names**
+- **Comment complex logic**
+- **Handle errors gracefully**
+- **Provide helpful error messages**
+- **Follow existing patterns in the codebase**
 
 ## Testing
-- [ ] Unit tests pass
-- [ ] GPU tests pass
-- [ ] Performance benchmarks pass
 
-## Checklist
-- [ ] Code follows style guidelines
-- [ ] Self-review completed
-- [ ] Documentation updated
-- [ ] Tests added/updated
-```
+### Before Submitting
 
-## 🧪 Testing Guidelines
+1. **Test your changes**:
+   ```bash
+   # For shell scripts
+   shellcheck your-script.sh
+   
+   # For Python
+   python -m pylint your_script.py
+   python -m pytest tests/
+   ```
 
-### Unit Tests
+2. **Test on sample data**:
+   - Small files
+   - Large files
+   - Edge cases
+   - Invalid input
 
-```python
-# Example test structure
-import pytest
-import torch
-from gpu_tts.engines import FastSpeech2GPU
+3. **Check performance**:
+   - Time execution on large datasets
+   - Monitor memory usage
+   - Compare with existing tools
 
-@pytest.mark.gpu
-def test_fastspeech2_synthesis():
-    engine = FastSpeech2GPU(config)
-    text = "Hello world"
-    
-    with torch.cuda.device(0):
-        audio = engine.synthesize(text)
-    
-    assert audio.shape[0] > 0
-    assert engine.get_rtf() < 0.1
-```
+### Test Data
 
-### Performance Tests
+- Keep test files small (< 1MB)
+- Use synthetic data when possible
+- Never commit sensitive data
+- Include both positive and negative test cases
 
-```python
-@pytest.mark.benchmark
-def test_batch_performance(benchmark):
-    engine = FastSpeech2GPU(config)
-    texts = ["Test sentence"] * 32
-    
-    result = benchmark(engine.batch_synthesize, texts)
-    
-    assert result.rtf < 0.05
-    assert result.gpu_util > 0.8
-```
+## Pull Request Process
 
-## 🚀 GPU Optimization Guidelines
+1. **Update documentation** for any changed functionality
+2. **Add tests** if applicable
+3. **Ensure all tests pass**
+4. **Update the README** if adding new tools
+5. **Request review** from maintainers
 
-### CUDA Kernel Development
+## Recognition
 
-1. Profile before optimizing
-2. Minimize memory transfers
-3. Use shared memory effectively
-4. Optimize thread block sizes
-5. Document performance gains
+Contributors will be:
+- Listed in CONTRIBUTORS.md
+- Credited in release notes
+- Thanked in commit messages
 
-### Example CUDA Kernel
+## Questions?
 
-```cpp
-__global__ void custom_mel_kernel(
-    float* input,
-    float* output,
-    int batch_size,
-    int seq_len,
-    int n_mels
-) {
-    // Efficient implementation
-    extern __shared__ float shared_mem[];
-    
-    int tid = blockIdx.x * blockDim.x + threadIdx.x;
-    // ... kernel implementation
-}
-```
+Feel free to:
+- Open an issue for discussion
+- Contact maintainers
+- Join our community discussions
 
-## 📊 Benchmarking
+Thank you for contributing! 🙏
 
-All performance-critical changes must include benchmarks:
+---
 
-```bash
-# Run standard benchmarks
-python benchmarks/run_benchmarks.py
-
-# Profile specific model
-python benchmarks/profile_model.py --model fastspeech2 --batch-size 32
-
-# Compare implementations
-python benchmarks/compare_implementations.py --baseline v1.0 --new feature/branch
-```
-
-## 🔍 Code Review Process
-
-### Review Checklist
-
-- [ ] Code quality and style
-- [ ] Performance impact
-- [ ] GPU memory usage
-- [ ] Documentation completeness
-- [ ] Test coverage
-- [ ] Security considerations
-
-### Performance Criteria
-
-- No regression in RTF
-- GPU utilization maintained
-- Memory usage optimized
-- Batch processing efficient
-
-## 🐛 Debugging GPU Issues
-
-### Common Issues and Solutions
-
-1. **CUDA Out of Memory**
-   - Check batch sizes
-   - Profile memory usage
-   - Implement gradient checkpointing
-
-2. **Low GPU Utilization**
-   - Profile kernel launches
-   - Check data transfer bottlenecks
-   - Optimize batch processing
-
-3. **Synchronization Issues**
-   - Use proper CUDA streams
-   - Check async operations
-   - Profile with Nsight
-
-## 📚 Resources
-
-- [CUDA Programming Guide](https://docs.nvidia.com/cuda/cuda-c-programming-guide/)
-- [PyTorch Performance Tuning](https://pytorch.org/tutorials/recipes/recipes/tuning_guide.html)
-- [TensorRT Documentation](https://docs.nvidia.com/deeplearning/tensorrt/developer-guide/)
-- [TTS Papers Collection](https://github.com/coqui-ai/TTS-papers)
-
-## 🤝 Community
-
-- Join discussions in GitHub Issues
-- Share benchmarks and optimizations
-- Help review pull requests
-- Contribute to documentation
-
-## 📄 License
-
-By contributing, you agree that your contributions will be licensed under the MIT License.
-
-Thank you for contributing to GPU-Accelerated TTS Toolkit! 🚀
+**Happy coding!** 🚀
