@@ -1,12 +1,7 @@
-# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
-
-# C extensions
 *.so
-
-# Distribution / packaging
 .Python
 build/
 develop-eggs/
@@ -23,69 +18,7 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-
-# Virtual environments
-venv/
-ENV/
-env/
-
-# IDEs
-.vscode/
 .idea/
-*.swp
-*.swo
-*~
-
-# OS files
-.DS_Store
-Thumbs.db
-
-# Logs
-*.log
-
-# Temporary files
-*.tmp
-*.temp
-tmp/
-temp/
-
-# Output files
-output/
-results/
-*.out
-
-# Data files (keep samples only)
-*.csv
-*.tsv
-*.xlsx
-!example_*.csv
-!sample_*.csv
-
-# Audio files (for TTS)
-*.mp3
-*.wav
-*.ogg
-!example_*.mp3
-!sample_*.wav
-
-# Model files
-*.pt
-*.pth
-*.h5
-*.pkl
-*.model
-
-# R
-.Rhistory
-.RData
-.Rproj.user
-
-# Jupyter
-.ipynb_checkpoints/
-
-# Secrets and credentials
-*.key
-*.pem
-.env
-credentials.json
-config.ini
+.vscode/
+venv/
+env/
