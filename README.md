@@ -67,9 +67,14 @@ See [QWEN3_VOICE_CLONING_GUIDE.md](QWEN3_VOICE_CLONING_GUIDE.md) for a detailed 
 - CUDA-capable GPU (recommended)
 - See `requirements.txt` and `requirements-qwen3.txt`
 
-## Attribution
+## Repository History & Attribution
 
-This repository was bootstrapped from a fork of [QwenLM/Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS). The `qwen_tts/` directory contains model code from the upstream Qwen3-TTS project by Alibaba's Qwen team. Contributors visible in the git history from the upstream repo (Xiong Wang, Anton Vlasjuk) are Qwen3-TTS authors, not contributors to this toolkit. All pipeline, integration, and deployment code is original work.
+This toolkit was assembled by merging several independent repositories, one of which was a fork of [QwenLM/Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS). As a result, the git history and GitHub contributor list include authors from those upstream projects who did not contribute to this toolkit:
+
+- **Xiong Wang** and **Anton Vlasjuk** are [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS) authors (Alibaba Qwen team). Their commits are upstream model code carried over from the fork.
+- **Claude** (Anthropic) appears due to commit trailers from AI-assisted code generation. Claude is a tool, not a contributor.
+
+The `qwen_tts/` directory (~9,200 lines) contains upstream Qwen3-TTS model and tokenizer code. Everything else — pipelines, TTS engine wrappers, text preprocessing, deployment scripts, MCP integration, and examples (~9,300 lines) — is original work.
 
 ## License
 
