@@ -4,12 +4,12 @@
 
 # gpu-tts-toolkit
 
-GPU-based text-to-speech pipelines for converting papers, documents, and text to audio. Supports multiple TTS backends including [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS), AWS Polly, and FastSpeech2.
+GPU-based text-to-speech pipelines for converting papers, documents, and text to audio. Built on [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS) and [Coqui TTS](https://github.com/coqui-ai/TTS).
 
 ## Features
 
 - **Paper-to-audio pipeline** — search, download, extract text, and synthesize speech from academic papers in one command
-- **Multiple TTS engines** — Qwen3-TTS (voice clone, voice design, custom voice), AWS Polly, FastSpeech2, Coqui TTS
+- **Multiple TTS engines** — Qwen3-TTS (voice clone, voice design, custom voice) and Coqui TTS (multi-speaker)
 - **GPU-accelerated** — optimized for NVIDIA GPUs including DGX Spark (128GB unified memory)
 - **Text preprocessing** — LaTeX extraction, text cleaning, chunked synthesis for long documents
 - **MCP integration** — Model Context Protocol server for TTS
@@ -55,9 +55,7 @@ gpu-tts-toolkit/
 | Engine | Use Case |
 |--------|----------|
 | **Qwen3-TTS** | High-quality neural TTS with voice cloning and design ([upstream repo](https://github.com/QwenLM/Qwen3-TTS)) |
-| **FastSpeech2** | Fast GPU-accelerated synthesis |
-| **Coqui TTS** | Open-source multi-speaker TTS |
-| **AWS Polly** | Cloud-based TTS via S3 |
+| **Coqui TTS** | Open-source multi-speaker TTS ([upstream repo](https://github.com/coqui-ai/TTS)) |
 
 ## Voice Cloning
 
