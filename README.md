@@ -4,12 +4,12 @@
 
 # gpu-tts-toolkit
 
-GPU-based text-to-speech pipelines for converting papers, documents, and text to audio. Built on [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS), [Coqui TTS](https://github.com/coqui-ai/TTS), and FastSpeech2.
+GPU-based text-to-speech pipelines for converting papers, documents, and text to audio. The supported examples use [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS); legacy Coqui TTS wrappers and an experimental FastSpeech2 prototype are also retained in the repository.
 
 ## Features
 
 - **Paper-to-audio pipeline** — search, download, extract text, and synthesize speech from academic papers in one command
-- **Multiple TTS engines** — Qwen3-TTS (voice clone, voice design, custom voice), Coqui TTS (multi-speaker), and FastSpeech2 (GPU-accelerated)
+- **Qwen3-TTS workflows** — voice cloning, voice design, and built-in CustomVoice speakers
 - **GPU-accelerated** — optimized for NVIDIA GPUs including DGX Spark (128GB unified memory)
 - **Text preprocessing** — LaTeX extraction, text cleaning, chunked synthesis for long documents
 - **MCP integration** — Model Context Protocol server for TTS
@@ -26,7 +26,7 @@ GPU-based text-to-speech pipelines for converting papers, documents, and text to
 python pipeline/paper_to_audio.py 'biomimetic concrete' --papers 3
 
 # Simple TTS
-python examples/simple_tts.py
+python examples/simple_tts.py --text "Hello from Qwen3-TTS"
 ```
 
 ## Project Structure
@@ -39,7 +39,7 @@ gpu-tts-toolkit/
 │   ├── pdf_to_text.py     #   Extract and clean text for TTS
 │   └── paper_to_audio.py  #   Orchestrate the full pipeline
 ├── core-engines/          # Low-level synthesis engines
-│   └── synthesis/         #   FastSpeech2 GPU, chunked TTS
+│   └── synthesis/         #   Experimental FastSpeech2 prototype, chunked TTS
 ├── tts-engines/           # Higher-level TTS wrappers
 ├── qwen_tts/              # Qwen3-TTS model integration
 ├── integrations/          # MCP server, external service connectors
@@ -51,11 +51,11 @@ gpu-tts-toolkit/
 
 ## TTS Engines
 
-| Engine | Use Case |
-|--------|----------|
-| **Qwen3-TTS** | High-quality neural TTS with voice cloning and design ([upstream repo](https://github.com/QwenLM/Qwen3-TTS)) |
-| **Coqui TTS** | Open-source multi-speaker TTS ([upstream repo](https://github.com/coqui-ai/TTS)) |
-| **FastSpeech2** | GPU-accelerated synthesis with TensorRT |
+| Engine | Status | Use Case |
+|--------|--------|----------|
+| **Qwen3-TTS** | Supported | Neural TTS with voice cloning, voice design, and CustomVoice speakers ([upstream repo](https://github.com/QwenLM/Qwen3-TTS)) |
+| **Coqui TTS** | Legacy wrapper | Optional multi-speaker experiments; Coqui TTS is not installed by this repository's requirements ([upstream repo](https://github.com/coqui-ai/TTS)) |
+| **FastSpeech2** | Experimental prototype | Architecture experiments only; no trained checkpoint or functional vocoder is included |
 
 ## Voice Cloning
 
