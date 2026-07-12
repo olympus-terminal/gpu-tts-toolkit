@@ -1,0 +1,51 @@
+name: Offline TTS example tests
+
+on:
+  push:
+    paths:
+      - "examples/simple_tts.py"
+      - "tests/test_simple_tts_20260712_094331.py"
+      - ".github/workflows/test_simple_tts_20260712_100506.yml"
+  pull_request:
+    paths:
+      - "examples/simple_tts.py"
+      - "tests/test_simple_tts_20260712_094331.py"
+      - ".github/workflows/test_simple_tts_20260712_100506.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  offline-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install test-only dependencies
+        run: python -m pip install --disable-pip-version-check numpy soundfile
+
+      - name: Run offline unit tests
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python tests/test_simple_tts_20260712_094331.py -v
+
+      - name: Validate CLI help and syntax
+        run: |
+          python examples/simple_tts.py --help >/dev/null
+          python - <<'PY'
+          from pathlib import Path
+
+          for path in (
+              Path("examples/simple_tts.py"),
+              Path("tests/test_simple_tts_20260712_094331.py"),
+          ):
+              compile(path.read_text(encoding="utf-8"), str(path), "exec")
+          PY
