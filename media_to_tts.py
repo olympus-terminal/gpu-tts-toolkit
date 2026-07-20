@@ -1536,19 +1536,25 @@ class TTSHallucinationScreener:
 
         # Check metadata
         meta_file = out / 'metadata.json'
+        planned_chunks = None
         if meta_file.exists():
             with open(meta_file) as f:
                 meta = json.load(f)
             report['metadata'] = meta
+            planned_chunks = meta.get('chunks')
 
         # Screen chunk texts
         chunks_dir = out / 'chunks'
+        screened_text_chunks = 0
+        screened_audio_chunks = 0
         if chunks_dir.exists():
+            screened_text_chunks = len(list(chunks_dir.glob('chunk_*.txt')))
             report['text_issues'] = self.screen_chunks_dir(str(chunks_dir))
 
             # Check for chunk numbering gaps
             chunk_files = sorted(chunks_dir.glob(f'chunk_*.mp3')) or \
                           sorted(chunks_dir.glob(f'chunk_*.wav'))
+            screened_audio_chunks = len(chunk_files)
             if chunk_files:
                 nums = []
                 for f in chunk_files:
@@ -1574,9 +1580,52 @@ class TTSHallucinationScreener:
                         'description': f'{af.name} is suspiciously small ({af.stat().st_size} bytes)',
                     })
 
+                # Require every chunk to decode and report a positive duration.
+                try:
+                    probe = subprocess.run(
+                        [
+                            'ffprobe', '-v', 'error',
+                            '-show_entries', 'format=duration',
+                            '-of', 'default=noprint_wrappers=1:nokey=1',
+                            str(af),
+                        ],
+                        capture_output=True,
+                        text=True,
+                        timeout=30,
+                    )
+                    duration = float(probe.stdout.strip()) if probe.returncode == 0 else 0.0
+                except (FileNotFoundError, subprocess.TimeoutExpired, ValueError):
+                    duration = 0.0
+                if duration <= 0:
+                    report['audio_issues'].append({
+                        'type': 'UNREADABLE_AUDIO',
+                        'file': af.name,
+                        'description': f'{af.name} could not be decoded or has zero duration',
+                    })
+
+        if type(planned_chunks) is int and planned_chunks >= 0:
+            if screened_text_chunks != planned_chunks:
+                report['audio_issues'].append({
+                    'type': 'INCOMPLETE_TEXT_CHUNKS',
+                    'description': (
+                        f'Expected {planned_chunks} chunk transcripts, found '
+                        f'{screened_text_chunks}'
+                    ),
+                })
+            if screened_audio_chunks != planned_chunks:
+                report['audio_issues'].append({
+                    'type': 'INCOMPLETE_AUDIO_CHUNKS',
+                    'description': (
+                        f'Expected {planned_chunks} audio chunks, found '
+                        f'{screened_audio_chunks}'
+                    ),
+                })
+
         report['summary'] = {
             'text_issues_count': len(report['text_issues']),
             'audio_issues_count': len(report['audio_issues']),
+            'screened_text_chunks': screened_text_chunks,
+            'screened_audio_chunks': screened_audio_chunks,
             'status': 'CLEAN' if not report['text_issues'] and not report['audio_issues'] else 'REVIEW_NEEDED',
         }
 
@@ -1732,7 +1781,10 @@ def main():
                 from deep_voice_tts import DeepVoiceTTS
                 print(f"\nSynthesising audio with voice={args.voice} ...")
                 tts = DeepVoiceTTS(voice_profile=args.voice, output_format=args.format)
-                tts_output_dir = tts.process_text_file(out_path)
+                tts_output_dir = tts.process_text_file(
+                    out_path,
+                    preserve_chunks=args.screen,
+                )
             except ImportError:
                 print("deep_voice_tts.py not found in PATH; skipping synthesis.")
             except Exception as e:
@@ -1858,7 +1910,10 @@ def main():
             from deep_voice_tts import DeepVoiceTTS
             print(f"\nSynthesising audio with voice={args.voice} ...")
             tts = DeepVoiceTTS(voice_profile=args.voice, output_format=args.format)
-            tts_output_dir = tts.process_text_file(out_path)
+            tts_output_dir = tts.process_text_file(
+                out_path,
+                preserve_chunks=args.screen,
+            )
         except ImportError:
             print("deep_voice_tts.py not found in PATH; skipping synthesis.")
         except Exception as e:

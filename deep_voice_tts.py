@@ -404,9 +404,12 @@ class DeepVoiceTTS:
         
         return chunks
     
-    def process_text_file(self, input_file, output_name=None):
+    def process_text_file(self, input_file, output_name=None, preserve_chunks=False):
         """
-        Process text file with deep voice generation
+        Process text file with deep voice generation.
+
+        Set ``preserve_chunks`` when a caller needs to inspect chunk text and
+        audio before performing its own cleanup (for example, QC screening).
         """
         input_path = Path(input_file)
         base_name = output_name or input_path.stem
@@ -484,10 +487,10 @@ class DeepVoiceTTS:
                 metadata["file_size_mb"] = round(file_size, 2)
                 print(f"📊 Size: {file_size:.2f} MB")
 
-                # Clean up intermediate chunk files
-                print("🧹 Cleaning up intermediate chunks...")
-                shutil.rmtree(chunks_dir)
-                print("✓ Chunks deleted")
+                if not preserve_chunks:
+                    print("🧹 Cleaning up intermediate chunks...")
+                    shutil.rmtree(chunks_dir)
+                    print("✓ Chunks deleted")
 
             except Exception as e:
                 print(f"Error combining: {e}")
