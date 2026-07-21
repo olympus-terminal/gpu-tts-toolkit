@@ -1452,7 +1452,7 @@ class TTSHallucinationScreener:
         (r'(?:\d+[.,]\s*){5,}', 'NUMBER_LIST',
          'Dense numeric list -- TTS stutter risk'),
         # Repeated words (TTS amplifies these)
-        (r'\b(\w{3,})\s+\1\b', 'WORD_REPEAT',
+        (r"(?i)(?<![\w'-])(\w{3,})(?:\s+\1(?![\w'-]))+", 'WORD_REPEAT',
          'Repeated word -- TTS may loop'),
         # Parenthetical citation debris
         (r'\(\s*\d{4}[a-z]?\s*\)', 'BARE_YEAR',
@@ -1477,6 +1477,18 @@ class TTSHallucinationScreener:
          'Control character in text -- TTS may produce noise'),
     ]
 
+    # A pair of adjacent number words is normal in spoken years, decimals,
+    # identifiers, and benchmark values (for example, "twenty twenty" or "two
+    # two percent"). Three or more copies still indicate a possible loop. Scale
+    # words such as "hundred" and "million" remain screened because repeating
+    # those is much more likely to be an editing error.
+    _BENIGN_NUMERIC_REPEATS = frozenset({
+        'zero', 'oh', 'one', 'two', 'three', 'four', 'five', 'six', 'seven',
+        'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen',
+        'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty',
+        'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety',
+    })
+
     def __init__(self):
         self.issues: list[dict] = []
 
@@ -1491,6 +1503,12 @@ class TTSHallucinationScreener:
         for line_num, line in enumerate(lines, 1):
             for pattern, name, desc in self._HALLUCINATION_TRIGGERS:
                 for m in re.finditer(pattern, line):
+                    if (
+                        name == 'WORD_REPEAT'
+                        and m.group(1).casefold() in self._BENIGN_NUMERIC_REPEATS
+                        and len(m.group().split()) == 2
+                    ):
+                        continue
                     self.issues.append({
                         'line': line_num,
                         'pattern': name,
